@@ -1,0 +1,10 @@
+C:\Users\HP\CodeBuddy\202604301115\FamilyGuard\node_modules\@react-native-async-storage\async-storage\android\build\generated\source\codegen\jni\CMakeLists.txt
+C:\Users\HP\CodeBuddy\202604301115\FamilyGuard\node_modules\@react-native-camera-roll\camera-roll\android\build\generated\source\codegen\jni\CMakeLists.txt
+C:\Users\HP\CodeBuddy\202604301115\FamilyGuard\node_modules\react-native-gesture-handler\android\build\generated\source\codegen\jni\CMakeLists.txt
+C:\Users\HP\CodeBuddy\202604301115\FamilyGuard\node_modules\react-native-safe-area-context\android\src\main\jni\CMakeLists.txt
+C:\Users\HP\CodeBuddy\202604301115\FamilyGuard\node_modules\react-native-screens\android\src\main\jni\CMakeLists.txt
+C:\Users\HP\CodeBuddy\202604301115\FamilyGuard\node_modules\react-native-share\android\build\generated\source\codegen\jni\CMakeLists.txt
+C:\Users\HP\CodeBuddy\202604301115\FamilyGuard\node_modules\react-native-svg\android\src\main\jni\CMakeLists.txt
+C:\Users\HP\CodeBuddy\202604301115\FamilyGuard\node_modules\react-native-vector-icons\android\build\generated\source\codegen\jni\CMakeLists.txt
+C:\Users\HP\CodeBuddy\202604301115\FamilyGuard\node_modules\react-native-view-shot\android\build\generated\source\codegen\jni\CMakeLists.txt
+C:\Users\HP\CodeBuddy\202604301115\FamilyGuard\node_modules\react-native\ReactAndroid\cmake-utils\default-app-setup\CMakeLists.txt

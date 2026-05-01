@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "RNShareSpec_autolinked_build",
+		"source" : "C:/Users/HP/CodeBuddy/202604301115/FamilyGuard/node_modules/react-native-share/android/build/generated/source/codegen/jni"
+	}
+}
