@@ -68,6 +68,16 @@ export interface Right {
   notes?: string;            // 备注
 }
 
+// 家庭成员类型别名（用于分析和计算）
+export interface FamilyMember {
+  id: string;
+  name: string;
+  role: MemberRole | string;  // 支持 MemberRole 或中文角色名
+  age?: number;
+  annualIncome?: number;
+  coverage?: Coverage[];
+}
+
 export interface Member {
   id: string;
   familyId: string;
@@ -90,6 +100,17 @@ export interface ExportSettings {
   customNotes: string;
   selectedMotto: string;
   aiSummary?: string;  // 预留AI总结
+}
+
+// 保险产品类型（用于分析和计算）
+export interface InsuranceProduct {
+  id: string;
+  name: string;
+  type: string;
+  coverage?: number;
+  premium?: number;
+  insuredMembers?: string[];
+  coverageDetails?: Coverage[];
 }
 
 export interface Family {

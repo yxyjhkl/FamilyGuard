@@ -12,6 +12,8 @@ import {
   Animated,
   Alert,
 } from 'react-native';
+import ViewShot from 'react-native-view-shot';
+import Share from 'react-native-share';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../types';
@@ -116,6 +118,28 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
     isAI?: boolean;
   } | null>(null);
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const viewShotRef = useRef<ViewShot>(null);
+  
+  // 截图分享功能
+  const handleCaptureAndShare = useCallback(async () => {
+    if (!viewShotRef.current) return;
+    
+    try {
+      const uri = await viewShotRef.current.capture?.();
+      if (uri) {
+        await Share.open({
+          url: uri,
+          type: 'image/png',
+          title: '家庭保障分析报告',
+        });
+      }
+    } catch (error: any) {
+      if (error?.message !== 'User did not share') {
+        console.error('分享失败:', error);
+        Alert.alert('分享失败', '请重试');
+      }
+    }
+  }, []);
   
   // AI配置状态 - 使用 state 避免单例状态不同步问题
   const [isAIConfigured, setIsAIConfigured] = useState(() => aiService.isConfigured());
@@ -145,10 +169,9 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
 综合评分: ${result.familyProtectionScore}分
 家庭保费: ${result.familyPremiumTotal.toLocaleString()}元/年
 
-保障缺口:
-${result.overallSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+保障缺口: ${result.totalGaps}项（高优先级${result.highPriorityGaps}项）
 
-💡建议: 请根据以上分析，合理配置家庭保障。`.slice(0, 300);
+💡建议: ${result.overallAdvice}`.slice(0, 300);
       
       await updateExportSettings(familyId, { aiSummary: summaryText });
     } catch (error) {
@@ -172,15 +195,10 @@ ${result.overallSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}
       const summaryText = `【${family.name}家庭保障分析】
 AI智能分析结果
 
-${result.summary}
+综合评分: ${result.familyProtectionScore}分
+保障缺口: ${result.totalGaps}项
 
-风险提示:
-${result.risks.map((r, i) => `${i + 1}. ${r}`).join('\n')}
-
-配置建议:
-${result.recommendations.map((r, i) => `${i + 1}. ${r}`).join('\n')}
-
-💡家庭画像: ${result.familyProfile}`.slice(0, 300);
+${result.aiSummary || result.overallAdvice}`.slice(0, 300);
       
       await updateExportSettings(familyId, { aiSummary: summaryText });
     } catch (error) {
@@ -269,7 +287,7 @@ ${result.recommendations.map((r, i) => `${i + 1}. ${r}`).join('\n')}
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {/* 分析按钮区 - 无分析结果且非加载中时显示 */}
         {!analysisResult && !isAnalyzing && (
-          <View style={styles.actionSection}>
+            <View style={styles.actionSection}>
             <Text style={styles.sectionTitle}>保障检视分析</Text>
             <Text style={styles.sectionDesc}>
               基于19项保障标准，为您的{family.name}进行智能分析
@@ -316,9 +334,10 @@ ${result.recommendations.map((r, i) => `${i + 1}. ${r}`).join('\n')}
           </View>
         )}
 
-        {/* 分析结果 */}
+        {/* 分析结果 - ViewShot 包裹用于截图 */}
         {analysisResult && (
           <>
+            <ViewShot ref={viewShotRef} options={{ format: 'png', quality: 1 }}>
             {/* 整体概览 */}
             <View style={styles.overviewCard}>
               <View style={styles.overviewHeader}>
@@ -394,18 +413,28 @@ ${result.recommendations.map((r, i) => `${i + 1}. ${r}`).join('\n')}
               />
             ))}
 
-            {/* 重新分析按钮 */}
+            {/* 底部操作按钮 - 放在 ViewShot 外面 */}
+          </ViewShot>
+          <View style={styles.bottomActions}>
             <TouchableOpacity
-              style={styles.reAnalyzeButton}
+              style={[styles.bottomButton, styles.shareButton]}
+              onPress={handleCaptureAndShare}
+            >
+              <Text style={styles.bottomButtonText}>📤 导出/分享</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.bottomButton, styles.reAnalyzeButton]}
               onPress={() => setAnalysisResult(null)}
             >
-              <Text style={styles.reAnalyzeText}>← 重新分析</Text>
+              <Text style={styles.bottomButtonText}>← 重新分析</Text>
             </TouchableOpacity>
+          </View>
           </>
         )}
+      </ScrollView>
 
-        {/* 话术生成区 */}
-        <View style={styles.scriptSection}>
+      {/* 话术生成区 */}
+      <View style={styles.scriptSection}>
           <Text style={styles.sectionTitle}>💬 谈单话术生成</Text>
           <Text style={styles.sectionDesc}>输入客户异议，自动生成专业回应话术</Text>
           <TextInput
@@ -483,7 +512,6 @@ ${result.recommendations.map((r, i) => `${i + 1}. ${r}`).join('\n')}
             </View>
           )}
         </View>
-      </ScrollView>
     </View>
   );
 };
@@ -575,6 +603,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background[0],
+  },
+  mainContent: {
+    flex: 1,
   },
   scroll: {
     flex: 1,
@@ -893,13 +924,40 @@ const styles = StyleSheet.create({
 
   // 重新分析
   reAnalyzeButton: {
-    marginHorizontal: spacing.lg,
+    flex: 1,
+    marginHorizontal: spacing.xs,
     paddingVertical: spacing.md,
+    backgroundColor: colors.primary[1],
+    borderRadius: borderRadius.sm,
     alignItems: 'center',
   },
   reAnalyzeText: {
     ...typography.body,
-    color: colors.primary[1],
+    color: '#fff',
+    fontWeight: '600',
+  },
+
+  // 底部操作按钮
+  bottomActions: {
+    flexDirection: 'row',
+    marginHorizontal: spacing.lg,
+    marginVertical: spacing.lg,
+  },
+  bottomButton: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shareButton: {
+    backgroundColor: colors.success?.[1] || '#34C759',
+    marginRight: spacing.xs,
+  },
+  bottomButtonText: {
+    ...typography.body,
+    color: '#fff',
+    fontWeight: '600',
   },
 
   // 话术区
