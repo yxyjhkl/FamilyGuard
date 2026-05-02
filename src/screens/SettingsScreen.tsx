@@ -527,7 +527,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
               </View>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>作者</Text>
-                <Text style={styles.aboutValue}>何克霖 2026.05.02</Text>
+                <Text style={styles.aboutValue}>凡事都凑何先生 klin 2026.05.02</Text>
               </View>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>版权所有</Text>
