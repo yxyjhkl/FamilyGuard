@@ -8,6 +8,7 @@ import MemberListScreen from '../screens/MemberListScreen';
 import MemberDetailScreen from '../screens/MemberDetailScreen';
 import ExportPreviewScreen from '../screens/ExportPreviewScreen';
 import MemberDetailExportScreen from '../screens/MemberDetailExportScreen';
+import AIAnalysisScreen from '../screens/AIAnalysisScreen';
 import HelpScreen from '../screens/HelpScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import {colors} from '../theme';
@@ -28,6 +29,7 @@ const AppNavigator: React.FC = () => {
       <Stack.Screen name="MemberDetail" component={MemberDetailScreen} />
       <Stack.Screen name="ExportPreview" component={ExportPreviewScreen} />
       <Stack.Screen name="MemberDetailExport" component={MemberDetailExportScreen} />
+      <Stack.Screen name="AIAnalysis" component={AIAnalysisScreen} />
       <Stack.Screen 
         name="Help" 
         component={HelpScreen}

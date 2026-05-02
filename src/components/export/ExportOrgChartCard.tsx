@@ -1,6 +1,6 @@
 // src/components/export/ExportOrgChartCard.tsx
 // 导出用 - 美观的家族双圈组织架构图
-import React, {useMemo} from 'react';
+import React, {useMemo, useState, memo} from 'react';
 import {View, Text, StyleSheet, Dimensions, TouchableOpacity} from 'react-native';
 import {colors, spacing} from '../../theme';
 import type {Family, Member} from '../../types';
@@ -13,12 +13,129 @@ import {maskName} from '../../utils/privacyUtils';
 
 const {width: SCREEN_WIDTH} = Dimensions.get('window');
 
+// 小屏阈值：屏幕宽度 < 360 时启用紧凑模式
+const SMALL_SCREEN_THRESHOLD = 360;
+// 紧凑模式外环节点数量（限制为15项，避免节点重叠）
+const COMPACT_COVERAGE_COUNT = 15;
+
 // 状态颜色
 const STATUS_COLORS = {
   none: '#E8E8E8',
   owned: '#34C759',
   claimed: '#E74C3C',
 };
+
+// ============================================
+// 性能优化：Memoized 节点组件
+// ============================================
+
+interface RightsNodeProps {
+  right: typeof insuranceRights[0];
+  index: number;
+  total: number;
+  innerRadius: number;
+  nodeSize: number;
+  containerSize: number;
+  hasRight: boolean;
+}
+
+const RightsNode: React.FC<RightsNodeProps> = memo(({
+  right,
+  index,
+  total,
+  innerRadius,
+  nodeSize,
+  containerSize,
+  hasRight,
+}) => {
+  const pos = getPositionOnCircle(index, total, innerRadius);
+  const isOwned = hasRight;
+
+  // 未拥有的节点不渲染阴影，减少 GPU 负担
+  const nodeStyle = [
+    styles.node,
+    {
+      left: containerSize / 2 + pos.x - nodeSize / 2,
+      top: containerSize / 2 + pos.y - nodeSize / 2,
+      width: nodeSize,
+      height: nodeSize,
+      borderRadius: nodeSize / 2,
+      backgroundColor: isOwned ? right.color : STATUS_COLORS.none,
+      borderColor: isOwned ? right.color : '#D0D0D0',
+      borderWidth: isOwned ? 0 : 1,
+      zIndex: 2,
+      // 未拥有时移除阴影
+      ...(isOwned ? {} : styles.nodeNoShadow),
+    },
+  ];
+
+  // 小屏模式下确保字体最小可读
+  const fontSize = Math.max(nodeSize * 0.5, 8);
+
+  return (
+    <View key={right.type} style={nodeStyle}>
+      <Text style={[styles.rightDotText, {color: isOwned ? '#fff' : '#888', fontSize}]}>
+        {right.shortLabel}
+      </Text>
+    </View>
+  );
+});
+
+interface CoverageNodeProps {
+  coverage: typeof INSURANCE_COVERAGES[0];
+  index: number;
+  total: number;
+  outerRadius: number;
+  nodeSize: number;
+  containerSize: number;
+  hasCoverage: boolean;
+}
+
+const CoverageNode: React.FC<CoverageNodeProps> = memo(({
+  coverage,
+  index,
+  total,
+  outerRadius,
+  nodeSize,
+  containerSize,
+  hasCoverage,
+}) => {
+  const pos = getPositionOnCircle(index, total, outerRadius);
+  const isOwned = hasCoverage;
+
+  // 未拥有的节点不渲染阴影
+  const nodeStyle = [
+    styles.node,
+    {
+      left: containerSize / 2 + pos.x - nodeSize / 2,
+      top: containerSize / 2 + pos.y - nodeSize / 2,
+      width: nodeSize,
+      height: nodeSize,
+      borderRadius: nodeSize / 2,
+      backgroundColor: isOwned ? coverage.color : STATUS_COLORS.none,
+      borderColor: isOwned ? coverage.color : '#D0D0D0',
+      borderWidth: isOwned ? 0 : 1,
+      zIndex: 1,
+      // 未拥有时移除阴影
+      ...(isOwned ? {} : styles.nodeNoShadow),
+    },
+  ];
+
+  // 小屏模式下确保字体最小可读
+  const fontSize = Math.max(nodeSize * 0.45, 7);
+
+  return (
+    <View key={coverage.type} style={nodeStyle}>
+      <Text style={[styles.nodeTextSmall, {color: isOwned ? '#fff' : '#888', fontSize}]}>
+        {coverage.shortLabel}
+      </Text>
+    </View>
+  );
+});
+
+// ============================================
+// 主组件
+// ============================================
 
 interface ExportOrgChartCardProps {
   family: Family;
@@ -29,6 +146,7 @@ interface ExportOrgChartCardProps {
   agentName: string;
   agentPhone: string;
   onMemberPress?: (member: Member) => void;
+  aiSummary?: string;
 }
 
 // 计算角度位置
@@ -62,124 +180,110 @@ interface MemberCircleProps {
   member: Member;
   showName: boolean;
   size?: number;
+  mode?: 'double' | 'single';
+  compactMode?: boolean;
   onPress?: (member: Member) => void;
 }
 
-const MemberCircle: React.FC<MemberCircleProps> = ({member, showName, size = 100, onPress}) => {
+const MemberCircle: React.FC<MemberCircleProps> = memo(({
+  member,
+  showName,
+  size = 100,
+  mode = 'double',
+  compactMode = false,
+  onPress
+}) => {
   const circleRadius = size * 0.42;
-  const nodeSize = size * 0.14;
+  // 小屏模式下稍微增大节点比例，确保可读性
+  const nodeSizeScale = compactMode ? 0.16 : 0.14;
+  const nodeSize = size * nodeSizeScale;
+  // 小屏模式下增大权益节点比例
+  const rightsNodeSize = size * (compactMode ? 0.14 : 0.12);
+  const outerRadius = circleRadius * 0.92;
+  const innerRadius = circleRadius * 0.55;
+  const avatarSize = size * 0.233;
 
-  const memberColor = getMemberAvatarColor(member.role);
+  const memberColor = useMemo(() => getMemberAvatarColor(member.role), [member.role]);
   const displayName = showName ? member.name : maskName(member.name, false);
 
-  // 渲染单圈保障
-  const renderCoverageCircle = () => {
-    const total = INSURANCE_COVERAGES.length;
-    return (
-      <View style={[styles.circleLayer, {width: size, height: size}]}>
-        {/* 外圈装饰环 */}
-        <View style={[styles.outerRing, {width: size, height: size, borderColor: memberColor}]} />
-        {INSURANCE_COVERAGES.map((coverage, index) => {
-          const pos = getPositionOnCircle(index, total, circleRadius);
-          // 从 coverage 数组获取状态
-          const coverageItem = member.coverage.find(c => c.type === coverage.type);
-          const status = coverageItem?.hasCoverage ? 'owned' : 'none';
+  // Memoize rights lookup map
+  const rightsMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    member.rights?.forEach(r => map.set(r.type, r.hasRight));
+    return map;
+  }, [member.rights]);
 
-          return (
-            <View
-              key={coverage.type}
-              style={[
-                styles.node,
-                {
-                  left: size / 2 + pos.x - nodeSize / 2,
-                  top: size / 2 + pos.y - nodeSize / 2,
-                  width: nodeSize,
-                  height: nodeSize,
-                  borderRadius: nodeSize / 2,
-                  backgroundColor: status === 'owned' ? coverage.color : STATUS_COLORS[status],
-                  borderColor: status === 'none' ? '#D0D0D0' : coverage.color,
-                  borderWidth: status === 'none' ? 1 : 0,
-                },
-              ]}>
-              <Text
-                style={[
-                  styles.nodeTextSmall,
-                  {color: status === 'owned' ? '#fff' : '#888'},
-                ]}>
-                {coverage.shortLabel}
-              </Text>
-            </View>
-          );
-        })}
-      </View>
-    );
-  };
+  // Memoize coverage lookup map
+  const coverageMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    member.coverage?.forEach(c => map.set(c.type, c.hasCoverage));
+    return map;
+  }, [member.coverage]);
 
-  // 渲染权益横排
-  const renderRightsRow = () => {
-    return (
-      <View style={styles.rightsRow}>
-        {insuranceRights.map(right => {
-          // 从 rights 数组获取状态
-          const rightItem = member.rights?.find(r => r.type === right.type);
-          const status = rightItem?.hasRight ? 'owned' : 'none';
-
-          return (
-            <View
-              key={right.type}
-              style={[
-                styles.rightDot,
-                {
-                  backgroundColor: status === 'owned' ? right.color : STATUS_COLORS[status],
-                  borderColor: status === 'none' ? '#D0D0D0' : right.color,
-                  borderWidth: status === 'none' ? 1 : 0,
-                },
-              ]}>
-              <Text style={[styles.rightDotText, {color: status === 'owned' ? '#fff' : '#888'}]}>
-                {right.shortLabel}
-              </Text>
-            </View>
-          );
-        })}
-      </View>
-    );
-  };
+  // 紧凑模式下使用前15项保障，避免节点重叠
+  const displayCoverages = compactMode
+    ? INSURANCE_COVERAGES.slice(0, COMPACT_COVERAGE_COUNT)
+    : INSURANCE_COVERAGES;
+  const coverageTotal = compactMode ? COMPACT_COVERAGE_COUNT : INSURANCE_COVERAGES.length;
 
   return (
     <TouchableOpacity
-      style={[styles.memberCircle, {width: size, height: size}]}
+      style={[styles.memberCircle, {width: size, height: mode === 'single' ? size : size}]}
       onPress={() => onPress?.(member)}
       activeOpacity={0.8}>
-      {/* 单圈保障 */}
-      {renderCoverageCircle()}
-      {/* 中心头像 */}
-      <View style={[styles.centerAvatar, {backgroundColor: memberColor}]}>
-        <RoleAvatar role={member.role} size={30} />
+      <View style={[styles.circleLayer, {width: size, height: size}]}>
+        {/* 外圈装饰环 */}
+        <View style={[styles.outerRing, {width: size, height: size, borderColor: memberColor}]} />
+
+        {/* 内环：8项权益 - 使用 Memoized 组件 */}
+        {insuranceRights.map((right, index) => (
+          <RightsNode
+            key={right.type}
+            right={right}
+            index={index}
+            total={insuranceRights.length}
+            innerRadius={innerRadius}
+            nodeSize={rightsNodeSize}
+            containerSize={size}
+            hasRight={rightsMap.get(right.type) ?? false}
+          />
+        ))}
+
+        {/* 外环：保障（紧凑模式下限制为15项） - 使用 Memoized 组件 */}
+        {displayCoverages.map((coverage, index) => (
+          <CoverageNode
+            key={coverage.type}
+            coverage={coverage}
+            index={index}
+            total={coverageTotal}
+            outerRadius={outerRadius}
+            nodeSize={nodeSize}
+            containerSize={size}
+            hasCoverage={coverageMap.get(coverage.type) ?? false}
+          />
+        ))}
+
+        {/* 中心大头像 */}
+        <View style={[styles.centerAvatarLarge, {backgroundColor: memberColor, width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, marginTop: -avatarSize / 2, marginLeft: -avatarSize / 2}]}>
+          <RoleAvatar role={member.role} size={avatarSize * 0.7} />
+        </View>
       </View>
-      {/* 权益横排 */}
-      {renderRightsRow()}
+
       {/* 姓名 */}
-      <Text style={styles.memberName} numberOfLines={1}>
+      <Text style={[styles.memberName, mode === 'single' && styles.memberNameLarge]} numberOfLines={1}>
         {displayName}
       </Text>
     </TouchableOpacity>
   );
-};
+});
 
-// 连接线组件
-interface ConnectionLineProps {
+// 连接线组件 - 使用 memo 优化
+const ConnectionLine: React.FC<{
   fromIndex: number;
   toIndex: number;
   totalMembers: number;
   cardWidth: number;
-}
-
-const ConnectionLine: React.FC<ConnectionLineProps> = ({
-  fromIndex,
-  toIndex,
-  totalMembers,
-  cardWidth,
-}) => {
+}> = memo(({ fromIndex, toIndex, totalMembers, cardWidth }) => {
   const startX = (fromIndex + 0.5) * (cardWidth / totalMembers);
   const endX = (toIndex + 0.5) * (cardWidth / totalMembers);
   const midY = 20;
@@ -196,7 +300,7 @@ const ConnectionLine: React.FC<ConnectionLineProps> = ({
       ]}
     />
   );
-};
+});
 
 const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
   family,
@@ -207,6 +311,7 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
   agentName,
   agentPhone,
   onMemberPress,
+  aiSummary,
 }) => {
   // 按层级分组
   const membersByLevel = useMemo(() => {
@@ -272,8 +377,66 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
     };
   }, [family]);
 
+  // 布局类型状态：'single' 竖排单列 | 'double' 双排
+  const [layoutType, setLayoutType] = useState<'single' | 'double'>('double');
+
+  // 小屏自适应：检测是否需要紧凑模式
+  const compactMode = SCREEN_WIDTH < SMALL_SCREEN_THRESHOLD;
+
   const levelLabels = ['祖辈', '本人', '子辈'];
   const levelColors = ['#FF9800', colors.primary[1], '#27AE60'];
+
+  // 获取所有成员（扁平化）
+  const allMembers = useMemo(() => {
+    return [...membersByLevel[0], ...membersByLevel[1], ...membersByLevel[2]];
+  }, [membersByLevel]);
+
+  // 渲染成员圆圈（根据布局类型决定大小和模式）
+  const renderMemberCircle = (member: Member, size: number, mode: 'single' | 'double' = 'double') => (
+    <MemberCircle
+      key={member.id}
+      member={member}
+      showName={showName}
+      size={size}
+      mode={mode}
+      compactMode={compactMode}
+      onPress={onMemberPress}
+    />
+  );
+
+  // 双排布局：两个一行，最后单个居中（双环结构）
+  const renderDoubleLayout = () => {
+    // 计算每个成员卡片的尺寸（利用屏幕宽度，减去边距和间距）
+    const cardSize = (SCREEN_WIDTH - 60) / 2; // 每行两个，中间间距20，左右边距共40
+
+    const rows = [];
+    for (let i = 0; i < allMembers.length; i += 2) {
+      if (i + 1 < allMembers.length) {
+        rows.push(
+          <View key={`row-${i}`} style={styles.doubleRow}>
+            {renderMemberCircle(allMembers[i], cardSize, 'single')}
+            {renderMemberCircle(allMembers[i + 1], cardSize, 'single')}
+          </View>
+        );
+      } else {
+        rows.push(
+          <View key={`row-${i}`} style={styles.singleCenterRow}>
+            {renderMemberCircle(allMembers[i], cardSize, 'single')}
+          </View>
+        );
+      }
+    }
+    return rows;
+  };
+
+  // 竖排单列布局：双环结构（内环权益+外环保障+大头像）
+  const renderSingleLayout = () => {
+    return allMembers.map(member => (
+      <View key={`single-${member.id}`} style={styles.singleMemberContainer}>
+        {renderMemberCircle(member, SCREEN_WIDTH - 80, 'single')}
+      </View>
+    ));
+  };
 
   return (
     <View style={styles.card}>
@@ -317,29 +480,26 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
 
       {/* 家族成员展示 */}
       <View style={styles.membersSection}>
-        {[0, 1, 2].map(level => {
-          const members = membersByLevel[level];
-          if (members.length === 0) return null;
+        {/* 布局切换按钮 */}
+        <View style={styles.layoutToggle}>
+          <TouchableOpacity
+            style={[styles.toggleBtn, layoutType === 'double' && styles.toggleBtnActive]}
+            onPress={() => setLayoutType('double')}>
+            <Text style={[styles.toggleBtnText, layoutType === 'double' && styles.toggleBtnTextActive]}>
+              双排
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleBtn, layoutType === 'single' && styles.toggleBtnActive]}
+            onPress={() => setLayoutType('single')}>
+            <Text style={[styles.toggleBtnText, layoutType === 'single' && styles.toggleBtnTextActive]}>
+              竖排
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-          return (
-            <View key={level} style={styles.levelRow}>
-              <View style={[styles.levelBadge, {backgroundColor: levelColors[level]}]}>
-                <Text style={styles.levelBadgeText}>{levelLabels[level]}</Text>
-              </View>
-              <View style={styles.levelMembers}>
-                {members.map(member => (
-                  <MemberCircle
-                    key={member.id}
-                    member={member}
-                    showName={showName}
-                    size={90}
-                    onPress={onMemberPress}
-                  />
-                ))}
-              </View>
-            </View>
-          );
-        })}
+        {/* 根据布局类型渲染 */}
+        {layoutType === 'double' ? renderDoubleLayout() : renderSingleLayout()}
       </View>
 
       {/* 图例区域 - 移至检视图下方 */}
@@ -363,58 +523,45 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
             <Text style={styles.legendStatusText}>理赔</Text>
           </View>
         </View>
-        
-        {/* 保障19项 - 按分类排列 */}
+
+        {/* 紧凑模式提示 */}
+        {compactMode && (
+          <View style={styles.compactModeHint}>
+            <Text style={styles.compactModeText}>小屏模式 · 显示15项核心保障</Text>
+          </View>
+        )}
+
+        {/* 保障项 - 紧凑模式下限制为15项 */}
         <View style={styles.legendCategory}>
-          <Text style={styles.legendCategoryTitle}>保障(19项)</Text>
+          <Text style={styles.legendCategoryTitle}>
+            保障({compactMode ? '15项' : '19项'})
+          </Text>
           <View style={styles.legendGrid}>
-            {/* 寿险/养老 */}
-            <View style={styles.legendGridRow}>
-              {INSURANCE_COVERAGES.slice(0, 2).map(c => (
-                <View key={c.type} style={styles.legendGridItem}>
-                  <View style={[styles.legendDot, {backgroundColor: c.color}]}>
-                    <Text style={styles.legendDotText}>{c.shortLabel}</Text>
-                  </View>
-                  <Text style={styles.legendLabel}>{c.fullLabel}</Text>
+            {/* 使用category分组，避免硬编码索引 */}
+            {['life', 'critical', 'accident', 'medical', 'education', 'special'].map(category => {
+              // 紧凑模式下只取前15项
+              const allItems = INSURANCE_COVERAGES.filter(c => c.category === category);
+              const items = compactMode
+                ? allItems.slice(0, Math.ceil(15 / 6)) // 均匀分布
+                : allItems;
+              if (items.length === 0) return null;
+
+              return (
+                <View key={category} style={styles.legendGridRow}>
+                  {items.map(c => (
+                    <View key={c.type} style={styles.legendGridItem}>
+                      <View style={[styles.legendDot, {backgroundColor: c.color}]}>
+                        <Text style={styles.legendDotText}>{c.shortLabel}</Text>
+                      </View>
+                      <Text style={styles.legendLabel}>{c.fullLabel}</Text>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
-            {/* 重疾类 */}
-            <View style={styles.legendGridRow}>
-              {INSURANCE_COVERAGES.slice(2, 7).map(c => (
-                <View key={c.type} style={styles.legendGridItem}>
-                  <View style={[styles.legendDot, {backgroundColor: c.color}]}>
-                    <Text style={styles.legendDotText}>{c.shortLabel}</Text>
-                  </View>
-                  <Text style={styles.legendLabel}>{c.fullLabel}</Text>
-                </View>
-              ))}
-            </View>
-            {/* 意外/医疗 */}
-            <View style={styles.legendGridRow}>
-              {INSURANCE_COVERAGES.slice(7, 13).map(c => (
-                <View key={c.type} style={styles.legendGridItem}>
-                  <View style={[styles.legendDot, {backgroundColor: c.color}]}>
-                    <Text style={styles.legendDotText}>{c.shortLabel}</Text>
-                  </View>
-                  <Text style={styles.legendLabel}>{c.fullLabel}</Text>
-                </View>
-              ))}
-            </View>
-            {/* 其他 */}
-            <View style={styles.legendGridRow}>
-              {INSURANCE_COVERAGES.slice(13, 18).map(c => (
-                <View key={c.type} style={styles.legendGridItem}>
-                  <View style={[styles.legendDot, {backgroundColor: c.color}]}>
-                    <Text style={styles.legendDotText}>{c.shortLabel}</Text>
-                  </View>
-                  <Text style={styles.legendLabel}>{c.fullLabel}</Text>
-                </View>
-              ))}
-            </View>
+              );
+            })}
           </View>
         </View>
-        
+
         {/* 权益8项 */}
         <View style={styles.legendCategory}>
           <Text style={styles.legendCategoryTitle}>权益(8项)</Text>
@@ -432,6 +579,17 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
           </View>
         </View>
       </View>
+
+      {/* AI智能总结 */}
+      {aiSummary ? (
+        <View style={styles.aiSummarySection}>
+          <View style={styles.aiSummaryHeader}>
+            <Text style={styles.aiSummaryIcon}>🤖</Text>
+            <Text style={styles.aiSummaryLabel}>AI智能总结</Text>
+          </View>
+          <Text style={styles.aiSummaryText}>{aiSummary}</Text>
+        </View>
+      ) : null}
 
       {/* 底部信息 */}
       <View style={styles.footer}>
@@ -584,6 +742,19 @@ const styles = StyleSheet.create({
     color: colors.text[1],
     marginBottom: 6,
   },
+  compactModeHint: {
+    backgroundColor: colors.functional.warning + '20',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    alignSelf: 'center',
+    marginBottom: 8,
+  },
+  compactModeText: {
+    fontSize: 9,
+    color: colors.functional.warning,
+    fontWeight: '500',
+  },
   legendGrid: {
     gap: 4,
   },
@@ -595,19 +766,19 @@ const styles = StyleSheet.create({
   legendGridItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 2,
     width: '23%',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   legendDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   legendDotText: {
-    fontSize: 6,
+    fontSize: 5,
     fontWeight: '700',
     color: '#fff',
   },
@@ -658,6 +829,51 @@ const styles = StyleSheet.create({
     gap: 16,
   },
 
+  // 布局切换
+  layoutToggle: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 16,
+    backgroundColor: '#E8E8E8',
+    borderRadius: 20,
+    padding: 2,
+  },
+  toggleBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 18,
+  },
+  toggleBtnActive: {
+    backgroundColor: colors.primary[1],
+  },
+  toggleBtnText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.text[2],
+  },
+  toggleBtnTextActive: {
+    color: '#fff',
+  },
+
+  // 双排布局
+  doubleRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+    marginBottom: 20,
+  },
+  singleCenterRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+
+  // 竖排单列布局
+  singleMemberContainer: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+
   // 成员双圈
   memberCircle: {
     alignItems: 'center',
@@ -683,6 +899,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 2,
     borderWidth: 1,
+  },
+  // 未拥有的节点：无阴影，减少渲染开销
+  nodeNoShadow: {
+    elevation: 0,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: {width: 0, height: 0},
+    shadowColor: 'transparent',
   },
   nodeText: {
     fontSize: 9,
@@ -718,6 +942,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
+  // 竖排模式的大头像（居中）
+  centerAvatarLarge: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 4,
+    borderColor: '#fff',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 3},
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+  },
   memberName: {
     position: 'absolute',
     bottom: -18,
@@ -727,9 +966,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     width: 70,
   },
+  // 竖排模式的大姓名
+  memberNameLarge: {
+    bottom: -25,
+    fontSize: 14,
+    fontWeight: '700',
+    width: 100,
+  },
   rightsRow: {
     position: 'absolute',
-    bottom: -2,
+    bottom: 10,
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 2,
@@ -750,6 +996,33 @@ const styles = StyleSheet.create({
     position: 'absolute',
     height: 2,
     backgroundColor: colors.card.border,
+  },
+
+  // AI总结
+  aiSummarySection: {
+    padding: 16,
+    backgroundColor: colors.primary[2] + '20',
+    borderTopWidth: 1,
+    borderTopColor: colors.card.border,
+  },
+  aiSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  aiSummaryIcon: {
+    fontSize: 14,
+    marginRight: 6,
+  },
+  aiSummaryLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary[1],
+  },
+  aiSummaryText: {
+    fontSize: 11,
+    color: colors.text[1],
+    lineHeight: 18,
   },
 
   // 底部

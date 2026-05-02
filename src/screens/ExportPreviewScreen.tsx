@@ -215,6 +215,7 @@ const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
                 agentName={family.exportSettings.agentName}
                 agentPhone={family.exportSettings.agentPhone}
                 onMemberPress={handleMemberPress}
+                aiSummary={family.exportSettings.aiSummary}
               />
             ) : (
               <ExportCard
@@ -225,6 +226,7 @@ const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
                 showAgentInfo={family.exportSettings.showAgentInfo}
                 agentName={family.exportSettings.agentName}
                 agentPhone={family.exportSettings.agentPhone}
+                aiSummary={family.exportSettings.aiSummary}
               />
             )}
           </ViewShot>
@@ -239,6 +241,16 @@ const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
 
       {/* 底部分享按钮 */}
       <View style={styles.bottomBar}>
+        {/* AI智能分析按钮 */}
+        <TouchableOpacity
+          style={styles.aiButton}
+          onPress={() => navigation.navigate('AIAnalysis', { familyId })}
+          activeOpacity={0.8}>
+          <Text style={styles.aiButtonIcon}>🤖</Text>
+          <Text style={styles.aiButtonText}>AI分析</Text>
+        </TouchableOpacity>
+
+        {/* 分享按钮 */}
         <TouchableOpacity
           style={[styles.shareButton, isExporting && styles.buttonDisabled]}
           onPress={handleShare}
@@ -386,14 +398,38 @@ const styles = StyleSheet.create({
     color: colors.text[2],
   },
   bottomBar: {
+    flexDirection: 'row',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     paddingBottom: spacing.xxxl,
     backgroundColor: colors.background[1],
     borderTopWidth: 1,
     borderTopColor: colors.card.border,
+    gap: spacing.sm,
+  },
+  aiButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary[2] + '30',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.primary[1] + '40',
+  },
+  aiButtonIcon: {
+    fontSize: 18,
+    marginRight: 6,
+  },
+  aiButtonText: {
+    ...typography.body,
+    color: colors.primary[1],
+    fontWeight: '600',
+    fontSize: 15,
   },
   shareButton: {
+    flex: 1,
     backgroundColor: colors.primary[1],
     paddingVertical: spacing.md,
     borderRadius: borderRadius.md,

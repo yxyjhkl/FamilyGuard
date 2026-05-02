@@ -733,7 +733,7 @@ const styles = StyleSheet.create({
 
   // 权益横排
   rightsRowContainer: {
-    marginTop: spacing.lg,
+    marginTop: spacing.xs,
     alignItems: 'center',
     width: '100%',
     paddingHorizontal: spacing.md,

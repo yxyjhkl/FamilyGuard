@@ -145,7 +145,7 @@ const SettingsContext = createContext<SettingsContextType | null>(null);
 
 // ========== 工具函数 ==========
 
-const getDefaultAmount = (type: CoverageType): number => {
+export const getDefaultAmount = (type: CoverageType): number => {
   return DEFAULT_RECOMMENDED_AMOUNTS[type] ?? 0;
 };
 
@@ -244,7 +244,7 @@ export const SettingsProvider: React.FC<{children: React.ReactNode}> = ({childre
       defaultMotto: state.defaultMotto,
       useDefaultMotto: state.useDefaultMotto,
       exportedAt: new Date().toISOString(),
-      version: '1.0',
+      version: '2.0.10',
     });
   }, [state]);
 

@@ -81,6 +81,9 @@ dependencies {
     // react-native-svg
     implementation(project(":react-native-svg"))
 
+    // react-native-async-storage
+    implementation(project(":react-native-async-storage_async-storage"))
+
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {

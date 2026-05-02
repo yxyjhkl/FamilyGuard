@@ -122,6 +122,7 @@ export type RootStackParamList = {
   MemberDetail: {familyId: string; memberId: string};
   ExportPreview: {familyId: string};
   MemberDetailExport: {familyId: string; memberId: string};
+  AIAnalysis: {familyId: string};
   Help: undefined;
   Settings: undefined;
 };

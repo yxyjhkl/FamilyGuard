@@ -98,16 +98,16 @@ const ExportConfigPanel: React.FC<ExportConfigPanelProps> = ({settings, onUpdate
         />
       </View>
 
-      {/* AI总结预留 */}
-      <View style={styles.section}>
+      {/* AI智能总结入口 */}
+      {/* <View style={styles.section}>
         <Text style={styles.sectionTitle}>AI智能总结</Text>
         <View style={styles.aiPlaceholder}>
           <Text style={styles.aiPlaceholderIcon}>🤖</Text>
           <Text style={styles.aiPlaceholderText}>
-            AI智能总结即将上线，配置API Key后可自动生成专业的保障检视报告总结。
+            请在"保障检视"页面点击AI分析按钮生成智能总结
           </Text>
         </View>
-      </View>
+      </View> */}
     </ScrollView>
   );
 };

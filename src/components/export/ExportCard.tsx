@@ -17,6 +17,7 @@ interface ExportCardProps {
   showAgentInfo: boolean;
   agentName: string;
   agentPhone: string;
+  aiSummary?: string;
 }
 
 const ExportCard: React.FC<ExportCardProps> = ({
@@ -27,6 +28,7 @@ const ExportCard: React.FC<ExportCardProps> = ({
   showAgentInfo,
   agentName,
   agentPhone,
+  aiSummary,
 }) => {
   return (
     <View style={styles.card}>
@@ -60,6 +62,17 @@ const ExportCard: React.FC<ExportCardProps> = ({
           <RightsSummary rights={member.rights} />
         </View>
       ))}
+
+      {/* AI智能总结 */}
+      {aiSummary ? (
+        <View style={styles.aiSummarySection}>
+          <View style={styles.aiSummaryHeader}>
+            <Text style={styles.aiSummaryIcon}>🤖</Text>
+            <Text style={styles.aiSummaryLabel}>AI智能总结</Text>
+          </View>
+          <Text style={styles.aiSummaryText}>{aiSummary}</Text>
+        </View>
+      ) : null}
 
       {/* 底部信息 */}
       <View style={styles.footer}>
@@ -150,6 +163,31 @@ const styles = StyleSheet.create({
   memberRole: {
     fontSize: 12,
     color: colors.text[2],
+  },
+  aiSummarySection: {
+    padding: spacing.lg,
+    backgroundColor: colors.primary[2] + '15',
+    borderTopWidth: 1,
+    borderTopColor: colors.card.border,
+  },
+  aiSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  aiSummaryIcon: {
+    fontSize: 16,
+    marginRight: spacing.xs,
+  },
+  aiSummaryLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary[1],
+  },
+  aiSummaryText: {
+    fontSize: 12,
+    color: colors.text[1],
+    lineHeight: 20,
   },
   footer: {
     padding: spacing.lg,

@@ -9,7 +9,9 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  ImageBackground,
 } from 'react-native';
+import logoImage from '../assets/images/logo.jpg';
 import ViewShot from 'react-native-view-shot';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '../types';
@@ -267,9 +269,9 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
         options={{format: 'jpg', quality: 0.9 }}>
         <View style={styles.card}>
           {/* 顶部标题 */}
-          <View style={styles.headerSection}>
+          <ImageBackground source={logoImage} style={styles.headerSection} resizeMode="cover">
             <View style={[styles.avatarCircle, {backgroundColor: memberColor}]}>
-              <RoleAvatar role={member.role} size={56} />
+              <RoleAvatar role={member.role} size={40} />
             </View>
             <Text style={styles.memberName}>{maskName(member.name, !hideName)}</Text>
             <Text style={styles.memberRole}>{MEMBER_ROLE_LABELS[member.role]}</Text>
@@ -286,7 +288,7 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
                 <Text style={styles.statLabel}>待完善</Text>
               </View>
             </View>
-          </View>
+          </ImageBackground>
 
           {/* 保障圈 */}
           <View style={styles.section}>
@@ -324,7 +326,7 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
               })}
               {/* 中心头像 */}
               <View style={[styles.centerAvatar, {backgroundColor: memberColor}]}>
-                <RoleAvatar role={member.role} size={40} />
+                <RoleAvatar role={member.role} size={200} />
               </View>
             </View>
           </View>

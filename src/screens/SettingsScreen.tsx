@@ -1,7 +1,7 @@
 // src/screens/SettingsScreen.tsx
 // 设置页面 - 全局建议保额、客户经理信息、金句配置
 
-import React, {useState, useCallback} from 'react';
+import React, {useState, useCallback, useEffect} from 'react';
 import {
   View,
   Text,
@@ -11,14 +11,17 @@ import {
   TextInput,
   Alert,
   Share,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '../types';
 import type {CoverageType} from '../types';
 import {INSURANCE_COVERAGES} from '../constants/insurance';
-import {DEFAULT_RECOMMENDED_AMOUNTS} from '../types';
 import {mottoList} from '../data/mottoList';
-import {useSettings, hasCustomAmounts, getCustomCount, isAgentInfoComplete} from '../store/settingsStore';
+import {useSettings, hasCustomAmounts, getCustomCount, isAgentInfoComplete, getDefaultAmount} from '../store/settingsStore';
+import {aiService, AI_PROVIDERS, type AIProvider} from '../services/aiService';
 import AppHeader from '../components/common/AppHeader';
 import {colors, typography, spacing, borderRadius} from '../theme';
 
@@ -40,9 +43,43 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
   } = useSettings();
 
   // 状态
-  const [activeTab, setActiveTab] = useState<'coverage' | 'agent' | 'motto' | 'data'>('agent');
+  const [activeTab, setActiveTab] = useState<'coverage' | 'agent' | 'motto' | 'data' | 'ai'>('agent');
   const [editingType, setEditingType] = useState<CoverageType | null>(null);
   const [editValue, setEditValue] = useState('');
+
+  // AI配置状态
+  const [aiProvider, setAiProvider] = useState<AIProvider>(() => {
+    const config = aiService.getUserConfig();
+    return config?.provider ?? 'deepseek';
+  });
+  const [aiApiKey, setAiApiKey] = useState(() => {
+    const config = aiService.getUserConfig();
+    return config?.apiKey ?? '';
+  });
+  const [aiEndpoint, setAiEndpoint] = useState(() => {
+    const config = aiService.getUserConfig();
+    return config?.endpoint ?? '';
+  });
+  const [aiModel, setAiModel] = useState(() => {
+    const config = aiService.getUserConfig();
+    return config?.model ?? '';
+  });
+  const [isAiConfigured, setIsAiConfigured] = useState(aiService.isConfigured());
+  const [showProviderList, setShowProviderList] = useState(false);
+  const [showModelList, setShowModelList] = useState(false);
+
+  // 获取当前提供商支持的模型列表
+  const currentProviderModels = aiService.getProviderConfig(aiProvider)?.models || [];
+
+  // 选择模型
+  const handleSelectModel = useCallback((modelId: string) => {
+    setAiModel(modelId);
+    setShowModelList(false);
+  }, []);
+  
+  // 恢复设置弹窗状态
+  const [restoreModalVisible, setRestoreModalVisible] = useState(false);
+  const [restoreInput, setRestoreInput] = useState('');
 
   // 客户经理信息编辑状态
   const [agentName, setAgentName] = useState(state.agentInfo.name);
@@ -56,7 +93,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
       if (state.customRecommendedAmounts[type] !== undefined) {
         return state.customRecommendedAmounts[type] as number;
       }
-      return DEFAULT_RECOMMENDED_AMOUNTS[type] ?? 0;
+      return getDefaultAmount(type);
     },
     [state.customRecommendedAmounts],
   );
@@ -125,6 +162,61 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
     Alert.alert('保存成功', '默认金句已设置');
   }, [setDefaultMotto]);
 
+  // 保存AI配置
+  const handleSaveAI = useCallback(() => {
+    if (!aiApiKey.trim()) {
+      Alert.alert('配置不完整', '请输入 API Key');
+      return;
+    }
+    
+    const providerConfig = aiService.getProviderConfig(aiProvider);
+    aiService.setConfig({
+      provider: aiProvider,
+      apiKey: aiApiKey.trim(),
+      endpoint: aiEndpoint.trim() || providerConfig?.defaultEndpoint || '',
+      model: aiModel.trim() || providerConfig?.defaultModel || '',
+      temperature: 0.7,
+      maxTokens: 2000,
+    });
+    
+    setIsAiConfigured(aiService.isConfigured());
+    Alert.alert('保存成功', 'AI 配置已保存，现在可以使用 AI 增强分析功能');
+  }, [aiProvider, aiApiKey, aiEndpoint, aiModel]);
+
+  // 清除AI配置
+  const handleClearAI = useCallback(() => {
+    Alert.alert(
+      '确认清除',
+      '确定要清除 AI 配置吗？清除后将只能使用本地分析功能。',
+      [
+        {text: '取消', style: 'cancel'},
+        {
+          text: '清除',
+          style: 'destructive',
+          onPress: () => {
+            aiService.clearConfig();
+            setAiApiKey('');
+            setAiEndpoint('');
+            setAiModel('');
+            setIsAiConfigured(false);
+            Alert.alert('已清除', 'AI 配置已清除');
+          },
+        },
+      ]
+    );
+  }, []);
+
+  // 选择AI服务商
+  const handleSelectProvider = useCallback((provider: AIProvider) => {
+    setAiProvider(provider);
+    const config = aiService.getProviderConfig(provider);
+    if (config) {
+      setAiEndpoint(config.defaultEndpoint);
+      setAiModel(config.defaultModel);
+    }
+    setShowProviderList(false);
+  }, []);
+
   // 备份设置
   const handleBackup = useCallback(async () => {
     try {
@@ -138,30 +230,24 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
     }
   }, [exportSettings]);
 
-  // 恢复设置
+  // 恢复设置 - Android兼容版本
   const handleRestore = useCallback(() => {
-    Alert.prompt(
-      '恢复设置',
-      '请粘贴之前备份的设置数据：',
-      [
-        {text: '取消', style: 'cancel'},
-        {
-          text: '恢复',
-          onPress: (text) => {
-            if (text) {
-              const success = importSettings(text);
-              if (success) {
-                Alert.alert('恢复成功', '设置已恢复');
-              } else {
-                Alert.alert('恢复失败', '数据格式无效');
-              }
-            }
-          },
-        },
-      ],
-      'plain-text',
-    );
-  }, [importSettings]);
+    setRestoreInput('');
+    setRestoreModalVisible(true);
+  }, []);
+
+  // 执行恢复操作
+  const handleRestoreConfirm = useCallback(() => {
+    if (restoreInput.trim()) {
+      const success = importSettings(restoreInput.trim());
+      setRestoreModalVisible(false);
+      if (success) {
+        Alert.alert('恢复成功', '设置已恢复');
+      } else {
+        Alert.alert('恢复失败', '数据格式无效');
+      }
+    }
+  }, [restoreInput, importSettings]);
 
   // 清除所有数据
   const handleClearData = useCallback(() => {
@@ -232,6 +318,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
             {key: 'agent', label: '客户经理', icon: '👤'},
             {key: 'coverage', label: '建议保额', icon: '💰'},
             {key: 'motto', label: '默认金句', icon: '✦'},
+            {key: 'ai', label: 'AI配置', icon: '🤖'},
             {key: 'data', label: '数据管理', icon: '📦'},
           ].map(tab => (
             <TouchableOpacity
@@ -357,7 +444,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
                 <View style={styles.coverageList}>
                   {items.map(item => {
                     const effectiveAmount = getEffectiveAmount(item.type);
-                    const defaultAmount = DEFAULT_RECOMMENDED_AMOUNTS[item.type] ?? 0;
+                    const defaultAmount = getDefaultAmount(item.type);
                     const isCustomized = state.customRecommendedAmounts[item.type] !== undefined;
                     const isEditing = editingType === item.type;
 
@@ -523,16 +610,184 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
               </View>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>版本</Text>
-                <Text style={styles.aboutValue}>V1.0.2</Text>
+                <Text style={styles.aboutValue}>V2.0.10</Text>
               </View>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>作者</Text>
-                <Text style={styles.aboutValue}>凡事都凑何先生 klin 2026.05.02</Text>
+                <Text style={styles.aboutValue}>泽麟保服技术中心</Text>
               </View>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>版权所有</Text>
-                <Text style={styles.aboutValue}>© 2026 凡事都凑何先生 klin</Text>
+                <Text style={styles.aboutValue}>© 2026 泽麟保服技术中心</Text>
               </View>
+            </View>
+          </View>
+        )}
+
+        {/* ========== AI配置 ========== */}
+        {activeTab === 'ai' && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>🤖 AI 配置</Text>
+              {isAiConfigured ? (
+                <View style={styles.statusBadge}>
+                  <Text style={styles.statusText}>已配置</Text>
+                </View>
+              ) : (
+                <View style={[styles.statusBadge, styles.statusBadgeWarning]}>
+                  <Text style={[styles.statusText, styles.statusTextWarning]}>未配置</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.sectionDesc}>
+              配置 AI API Key 后，可使用 AI 增强分析功能，获得更精准的个性化保障建议
+            </Text>
+
+            {/* 服务商选择 */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>AI 服务商</Text>
+              <TouchableOpacity
+                style={styles.providerSelector}
+                onPress={() => setShowProviderList(!showProviderList)}
+                activeOpacity={0.7}>
+                <Text style={styles.providerSelectorText}>
+                  {AI_PROVIDERS.find(p => p.id === aiProvider)?.logo}{' '}
+                  {AI_PROVIDERS.find(p => p.id === aiProvider)?.name}
+                </Text>
+                <Text style={styles.providerSelectorArrow}>▼</Text>
+              </TouchableOpacity>
+
+              {showProviderList && (
+                <View style={styles.providerList}>
+                  {AI_PROVIDERS.filter(p => p.id !== 'custom').map(provider => (
+                    <TouchableOpacity
+                      key={provider.id}
+                      style={[styles.providerItem, aiProvider === provider.id && styles.providerItemActive]}
+                      onPress={() => handleSelectProvider(provider.id)}
+                      activeOpacity={0.7}>
+                      <Text style={styles.providerItemLogo}>{provider.logo}</Text>
+                      <View style={styles.providerItemContent}>
+                        <Text style={[styles.providerItemName, aiProvider === provider.id && styles.providerItemNameActive]}>
+                          {provider.name}
+                        </Text>
+                        <Text style={styles.providerItemModel}>{provider.defaultModel}</Text>
+                      </View>
+                      {aiProvider === provider.id && (
+                        <Text style={styles.providerItemCheck}>✓</Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            {/* API Key */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>API Key *</Text>
+              <TextInput
+                style={styles.input}
+                value={aiApiKey}
+                onChangeText={setAiApiKey}
+                placeholder="请输入 API Key"
+                placeholderTextColor={colors.text[2]}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+
+            {/* Endpoint */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>API Endpoint</Text>
+              <TextInput
+                style={styles.input}
+                value={aiEndpoint}
+                onChangeText={setAiEndpoint}
+                placeholder={AI_PROVIDERS.find(p => p.id === aiProvider)?.defaultEndpoint || 'https://api.example.com/v1/chat/completions'}
+                placeholderTextColor={colors.text[2]}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Text style={styles.inputHint}>通常无需修改，使用默认值即可</Text>
+            </View>
+
+            {/* Model */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>模型选择</Text>
+              {currentProviderModels.length > 0 ? (
+                <TouchableOpacity
+                  style={styles.providerSelector}
+                  onPress={() => setShowModelList(!showModelList)}
+                  activeOpacity={0.7}>
+                  <Text style={styles.providerSelectorText}>
+                    {currentProviderModels.find(m => m.id === aiModel)?.name || aiModel || '请选择模型'}
+                  </Text>
+                  <Text style={styles.providerSelectorArrow}>▼</Text>
+                </TouchableOpacity>
+              ) : (
+                <TextInput
+                  style={styles.input}
+                  value={aiModel}
+                  onChangeText={setAiModel}
+                  placeholder="请输入模型名称"
+                  placeholderTextColor={colors.text[2]}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              )}
+
+              {showModelList && currentProviderModels.length > 0 && (
+                <View style={styles.providerList}>
+                  {currentProviderModels.map(model => (
+                    <TouchableOpacity
+                      key={model.id}
+                      style={[styles.providerItem, aiModel === model.id && styles.providerItemActive]}
+                      onPress={() => handleSelectModel(model.id)}
+                      activeOpacity={0.7}>
+                      <View style={styles.providerItemContent}>
+                        <Text style={[styles.providerItemName, aiModel === model.id && styles.providerItemNameActive]}>
+                          {model.name}
+                        </Text>
+                        {model.description && (
+                          <Text style={styles.providerItemModel}>{model.description}</Text>
+                        )}
+                      </View>
+                      {aiModel === model.id && (
+                        <Text style={styles.providerItemCheck}>✓</Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            {/* 保存按钮 */}
+            <TouchableOpacity
+              style={styles.saveButton}
+              onPress={handleSaveAI}
+              activeOpacity={0.8}>
+              <Text style={styles.saveButtonText}>保存 AI 配置</Text>
+            </TouchableOpacity>
+
+            {/* 清除按钮 */}
+            {isAiConfigured && (
+              <TouchableOpacity
+                style={[styles.saveButton, styles.clearButton]}
+                onPress={handleClearAI}
+                activeOpacity={0.8}>
+                <Text style={styles.clearButtonText}>清除 AI 配置</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* 提示信息 */}
+            <View style={styles.aiTips}>
+              <Text style={styles.aiTipsTitle}>💡 使用说明</Text>
+              <Text style={styles.aiTipsText}>
+                1. 选择 AI 服务商（推荐 DeepSeek 或月之暗面）{'\n'}
+                2. 前往服务商官网获取 API Key{'\n'}
+                3. 将 API Key 粘贴到上方输入框{'\n'}
+                4. 点击保存即可使用 AI 分析功能
+              </Text>
             </View>
           </View>
         )}
@@ -544,6 +799,46 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
           </Text>
         </View>
       </ScrollView>
+
+      {/* 恢复设置弹窗 - Android兼容版本 */}
+      <Modal
+        visible={restoreModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRestoreModalVisible(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.restoreModalOverlay}>
+          <View style={styles.restoreModalContent}>
+            <Text style={styles.restoreModalTitle}>恢复设置</Text>
+            <Text style={styles.restoreModalDesc}>
+              请粘贴之前备份的设置数据：
+            </Text>
+            <TextInput
+              style={styles.restoreModalInput}
+              value={restoreInput}
+              onChangeText={setRestoreInput}
+              placeholder="粘贴备份数据..."
+              placeholderTextColor={colors.text[2]}
+              multiline
+              numberOfLines={6}
+              textAlignVertical="top"
+            />
+            <View style={styles.restoreModalButtons}>
+              <TouchableOpacity
+                style={styles.restoreModalCancelBtn}
+                onPress={() => setRestoreModalVisible(false)}>
+                <Text style={styles.restoreModalCancelText}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.restoreModalConfirmBtn}
+                onPress={handleRestoreConfirm}>
+                <Text style={styles.restoreModalConfirmText}>恢复</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
@@ -966,6 +1261,172 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 13,
+    color: colors.text[1],
+    lineHeight: 20,
+  },
+  // 恢复设置弹窗样式
+  restoreModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  restoreModalContent: {
+    width: '100%',
+    backgroundColor: colors.background[1],
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+  },
+  restoreModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text[0],
+    marginBottom: spacing.md,
+  },
+  restoreModalDesc: {
+    fontSize: 14,
+    color: colors.text[1],
+    marginBottom: spacing.md,
+  },
+  restoreModalInput: {
+    backgroundColor: colors.background[0],
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    fontSize: 14,
+    color: colors.text[0],
+    minHeight: 120,
+    borderWidth: 1,
+    borderColor: colors.card.border,
+    marginBottom: spacing.md,
+  },
+  restoreModalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+  },
+  restoreModalCancelBtn: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background[2],
+  },
+  restoreModalCancelText: {
+    fontSize: 15,
+    color: colors.text[1],
+    fontWeight: '500',
+  },
+  restoreModalConfirmBtn: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary[1],
+  },
+  restoreModalConfirmText: {
+    fontSize: 15,
+    color: colors.text[3],
+    fontWeight: '600',
+  },
+  // AI配置样式
+  statusBadgeWarning: {
+    backgroundColor: colors.functional.warning + '20',
+  },
+  statusTextWarning: {
+    color: colors.functional.warning,
+  },
+  providerSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.background[0],
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.card.border,
+  },
+  providerSelectorText: {
+    fontSize: 15,
+    color: colors.text[0],
+    fontWeight: '500',
+  },
+  providerSelectorArrow: {
+    fontSize: 12,
+    color: colors.text[2],
+  },
+  providerList: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.background[0],
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.card.border,
+    overflow: 'hidden',
+  },
+  providerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.card.border,
+  },
+  providerItemActive: {
+    backgroundColor: colors.primary[2] + '15',
+  },
+  providerItemLogo: {
+    fontSize: 20,
+    marginRight: spacing.md,
+  },
+  providerItemContent: {
+    flex: 1,
+  },
+  providerItemName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.text[0],
+  },
+  providerItemNameActive: {
+    color: colors.primary[1],
+  },
+  providerItemModel: {
+    fontSize: 11,
+    color: colors.text[2],
+    marginTop: 2,
+  },
+  providerItemCheck: {
+    fontSize: 16,
+    color: colors.primary[1],
+    fontWeight: '700',
+  },
+  inputHint: {
+    fontSize: 11,
+    color: colors.text[2],
+    marginTop: spacing.xs,
+  },
+  clearButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.functional.error,
+    marginTop: spacing.md,
+  },
+  clearButtonText: {
+    fontSize: 15,
+    color: colors.functional.error,
+    fontWeight: '600',
+  },
+  aiTips: {
+    marginTop: spacing.xl,
+    padding: spacing.md,
+    backgroundColor: colors.functional.infoLight || '#E3F2FD',
+    borderRadius: borderRadius.md,
+  },
+  aiTipsTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text[0],
+    marginBottom: spacing.sm,
+  },
+  aiTipsText: {
+    fontSize: 12,
     color: colors.text[1],
     lineHeight: 20,
   },
