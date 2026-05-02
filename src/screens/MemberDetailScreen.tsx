@@ -75,13 +75,11 @@ const MemberDetailScreen: React.FC<Props> = ({route, navigation}) => {
 
   const saveAge = useCallback(() => {
     const newAge = parseInt(ageInput, 10);
-    if (!isNaN(newAge) && newAge >= 0 && newAge <= 120 && localMember) {
-      setLocalMember(prev => prev ? {...prev, age: newAge} : prev);
-      setTimeout(() => {
-        if (localMember) {
-          updateMember(familyId, {...localMember, age: newAge});
-        }
-      }, 0);
+    if (!isNaN(newAge) && newAge >= 0 && newAge <= 120) {
+      // 直接使用 newAge 值，避免闭包陷阱
+      const updatedMember = {...localMember, age: newAge};
+      setLocalMember(updatedMember);
+      updateMember(familyId, updatedMember);
     }
     setEditingAge(false);
   }, [ageInput, localMember, familyId, updateMember]);
@@ -96,13 +94,11 @@ const MemberDetailScreen: React.FC<Props> = ({route, navigation}) => {
 
   const saveName = useCallback(() => {
     const trimmedName = nameInput.trim();
-    if (trimmedName && localMember) {
-      setLocalMember(prev => prev ? {...prev, name: trimmedName} : prev);
-      setTimeout(() => {
-        if (localMember) {
-          updateMember(familyId, {...localMember, name: trimmedName});
-        }
-      }, 0);
+    if (trimmedName) {
+      // 直接使用新名称，避免闭包陷阱
+      const updatedMember = {...localMember, name: trimmedName};
+      setLocalMember(updatedMember);
+      updateMember(familyId, updatedMember);
     }
     setEditingName(false);
   }, [nameInput, localMember, familyId, updateMember]);

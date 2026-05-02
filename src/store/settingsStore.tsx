@@ -1,5 +1,5 @@
 // src/store/settingsStore.tsx
-// 全局设置状态管理 - 支持自定义建议保额、业务员信息、金句等
+// 全局设置状态管理 - 支持自定义建议保额、客户经理信息、金句等
 
 import React, {createContext, useContext, useReducer, useEffect, useCallback} from 'react';
 import type {CoverageType} from '../types';
@@ -8,7 +8,7 @@ import {storageService} from './storageService';
 
 // ========== 类型定义 ==========
 
-// 业务员信息
+// 客户经理信息
 export interface AgentInfo {
   name: string;
   employeeId: string;
@@ -27,7 +27,7 @@ export interface SettingsState {
   customRecommendedAmounts: CustomRecommendedAmounts;
   useGlobalCustom: boolean;
   
-  // 业务员信息
+  // 客户经理信息
   agentInfo: AgentInfo;
   
   // 默认金句

@@ -12,11 +12,12 @@ export interface MemberCoverageDetail {
   validityDate?: string;  // 有效期
 }
 
-// 保险保障类型（18项统一规则）
+// 保险保障类型（19项统一规则）
 export type CoverageType =
   // 寿险/身价
   | 'death'            // 身故保障（寿）
   | 'pension'          // 养老年金（养）
+  | 'childPension'     // 少儿年金（少）
   // 重疾类
   | 'criticalIllness'  // 重疾保障（重）
   | 'moderateIllness'   // 中度重疾（中）
@@ -125,11 +126,12 @@ export type RootStackParamList = {
   Settings: undefined;
 };
 
-// 保险保障标签（18项统一规则）
+// 保险保障标签（19项统一规则）
 export const COVERAGE_LABELS: Record<CoverageType, string> = {
   // 寿险/身价
   death: '身故保障（寿）',
   pension: '养老年金（养）',
+  childPension: '少儿年金（少）',
   // 重疾类
   criticalIllness: '重疾保障（重）',
   moderateIllness: '中度重疾（中）',
@@ -168,6 +170,7 @@ export const RIGHT_LABELS: Record<RightType, string> = {
 export const DEFAULT_RECOMMENDED_AMOUNTS: Record<CoverageType, number> = {
   death: 100,
   pension: 200,
+  childPension: 30,
   criticalIllness: 50,
   moderateIllness: 30,
   minorIllness: 15,

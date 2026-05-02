@@ -12,8 +12,15 @@ import {colors, typography, spacing, borderRadius} from '../theme';
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
 const HomeScreen: React.FC<Props> = ({navigation}) => {
-  const {families, loading, deleteFamily} = useFamily();
+  const {families, loading, reloadFamilies, deleteFamily} = useFamily();
+  const [refreshing, setRefreshing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Family | null>(null);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await reloadFamilies();
+    setRefreshing(false);
+  }, [reloadFamilies]);
 
   const handleFamilyPress = useCallback(
     (family: Family) => {
@@ -86,6 +93,13 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
           ) : null
         }
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#666"
+          />
+        }
       />
 
       {/* 新建按钮 FAB */}

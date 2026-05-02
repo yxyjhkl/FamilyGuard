@@ -56,7 +56,7 @@ const CoverageItem: React.FC<CoverageItemProps> = ({coverage, onToggle, onAmount
         <View style={styles.leftSection}>
           <View style={[styles.icon, {backgroundColor: iconColor + '20'}]}>
             <Text style={[styles.iconText, {color: iconColor}]}>
-              {/* 18项统一规则图标 */}
+              {/* 19项统一规则图标 */}
               {coverage.type === 'death' ? '寿' :
                coverage.type === 'pension' ? '养' :
                coverage.type === 'criticalIllness' ? '重' :

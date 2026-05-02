@@ -7,7 +7,7 @@ import type {Family, Member} from '../../types';
 import {MEMBER_ROLE_LABELS} from '../../types';
 import RoleAvatar from '../common/RoleAvatar';
 import {insuranceRights} from '../../data/insuranceRights';
-import {insuranceCoverages} from '../../data/insuranceCoverages';
+import {INSURANCE_COVERAGES} from '../../constants/insurance';
 import {formatTimestamp} from '../../utils/formatUtils';
 import {maskName} from '../../utils/privacyUtils';
 
@@ -74,12 +74,12 @@ const MemberCircle: React.FC<MemberCircleProps> = ({member, showName, size = 100
 
   // 渲染单圈保障
   const renderCoverageCircle = () => {
-    const total = insuranceCoverages.length;
+    const total = INSURANCE_COVERAGES.length;
     return (
       <View style={[styles.circleLayer, {width: size, height: size}]}>
         {/* 外圈装饰环 */}
         <View style={[styles.outerRing, {width: size, height: size, borderColor: memberColor}]} />
-        {insuranceCoverages.map((coverage, index) => {
+        {INSURANCE_COVERAGES.map((coverage, index) => {
           const pos = getPositionOnCircle(index, total, circleRadius);
           // 从 coverage 数组获取状态
           const coverageItem = member.coverage.find(c => c.type === coverage.type);
@@ -251,7 +251,7 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
   // 统计
   const stats = useMemo(() => {
     let ownedCoverage = 0;
-    let totalCoverage = insuranceCoverages.length * family.members.length;
+    let totalCoverage = INSURANCE_COVERAGES.length * family.members.length;
     let ownedRights = 0;
     let totalRights = insuranceRights.length * family.members.length;
 
@@ -364,13 +364,13 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
           </View>
         </View>
         
-        {/* 保障18项 - 按分类排列 */}
+        {/* 保障19项 - 按分类排列 */}
         <View style={styles.legendCategory}>
-          <Text style={styles.legendCategoryTitle}>保障(18项)</Text>
+          <Text style={styles.legendCategoryTitle}>保障(19项)</Text>
           <View style={styles.legendGrid}>
             {/* 寿险/养老 */}
             <View style={styles.legendGridRow}>
-              {insuranceCoverages.slice(0, 2).map(c => (
+              {INSURANCE_COVERAGES.slice(0, 2).map(c => (
                 <View key={c.type} style={styles.legendGridItem}>
                   <View style={[styles.legendDot, {backgroundColor: c.color}]}>
                     <Text style={styles.legendDotText}>{c.shortLabel}</Text>
@@ -381,7 +381,7 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
             </View>
             {/* 重疾类 */}
             <View style={styles.legendGridRow}>
-              {insuranceCoverages.slice(2, 7).map(c => (
+              {INSURANCE_COVERAGES.slice(2, 7).map(c => (
                 <View key={c.type} style={styles.legendGridItem}>
                   <View style={[styles.legendDot, {backgroundColor: c.color}]}>
                     <Text style={styles.legendDotText}>{c.shortLabel}</Text>
@@ -392,7 +392,7 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
             </View>
             {/* 意外/医疗 */}
             <View style={styles.legendGridRow}>
-              {insuranceCoverages.slice(7, 13).map(c => (
+              {INSURANCE_COVERAGES.slice(7, 13).map(c => (
                 <View key={c.type} style={styles.legendGridItem}>
                   <View style={[styles.legendDot, {backgroundColor: c.color}]}>
                     <Text style={styles.legendDotText}>{c.shortLabel}</Text>
@@ -403,7 +403,7 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
             </View>
             {/* 其他 */}
             <View style={styles.legendGridRow}>
-              {insuranceCoverages.slice(13, 18).map(c => (
+              {INSURANCE_COVERAGES.slice(13, 18).map(c => (
                 <View key={c.type} style={styles.legendGridItem}>
                   <View style={[styles.legendDot, {backgroundColor: c.color}]}>
                     <Text style={styles.legendDotText}>{c.shortLabel}</Text>

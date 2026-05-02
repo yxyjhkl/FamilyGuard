@@ -1,9 +1,19 @@
 // src/services/exportService.ts
 // 导出服务 - 支持截图、保存相册和分享
-import {Alert, Platform, PermissionsAndroid} from 'react-native';
+import {Alert, Linking, Platform, PermissionsAndroid} from 'react-native';
 import {CameraRoll} from '@react-native-camera-roll/camera-roll';
 import Share from 'react-native-share';
 import ViewShot from 'react-native-view-shot';
+
+// 引导用户去设置页面开启权限
+function openAppSettings(): void {
+  Linking.openSettings().catch(() => {
+    Alert.alert(
+      '操作失败',
+      '无法打开系统设置，请手动进入：设置 > 应用 > 家庭保障 > 权限',
+    );
+  });
+}
 
 class ExportService {
   private viewShotRef: ViewShot | null = null;
@@ -13,12 +23,17 @@ class ExportService {
   }
 
   // 请求存储权限（Android）
-  private async requestStoragePermission(): Promise<boolean> {
-    if (Platform.OS !== 'android') return true;
+  private async requestStoragePermission(): Promise<
+    'granted' | 'denied' | 'never_ask_again'
+  > {
+    if (Platform.OS !== 'android') return 'granted';
+
+    // Platform.Version 在 Android 上是字符串，需转换为数字
+    const androidVersion = parseInt(String(Platform.Version), 10);
 
     try {
-      // Android 13+ 使用照片权限
-      if (Platform.Version >= 33) {
+      // Android 13+ (API 33+) 使用照片权限
+      if (androidVersion >= 33) {
         const result = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
           {
@@ -29,7 +44,13 @@ class ExportService {
             buttonPositive: '确定',
           },
         );
-        return result === PermissionsAndroid.RESULTS.GRANTED;
+        if (result === PermissionsAndroid.RESULTS.GRANTED) {
+          return 'granted';
+        }
+        if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+          return 'never_ask_again';
+        }
+        return 'denied';
       } else {
         // Android 13 以下使用存储权限
         const result = await PermissionsAndroid.request(
@@ -42,11 +63,17 @@ class ExportService {
             buttonPositive: '确定',
           },
         );
-        return result === PermissionsAndroid.RESULTS.GRANTED;
+        if (result === PermissionsAndroid.RESULTS.GRANTED) {
+          return 'granted';
+        }
+        if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+          return 'never_ask_again';
+        }
+        return 'denied';
       }
     } catch (err) {
       console.warn('存储权限请求失败:', err);
-      return false;
+      return 'denied';
     }
   }
 
@@ -69,27 +96,43 @@ class ExportService {
 
   // 保存到相册
   async saveToAlbum(uri: string): Promise<boolean> {
-    const hasPermission = await this.requestStoragePermission();
-    if (!hasPermission) {
-      Alert.alert('权限不足', '请授予存储权限后重试');
+    const permissionResult = await this.requestStoragePermission();
+
+    if (permissionResult === 'granted') {
+      // 权限已授予，执行保存
+      try {
+        await CameraRoll.saveAsset(uri, {type: 'photo'});
+        return true;
+      } catch (error) {
+        console.error('保存相册失败:', error);
+        // 尝试使用其他方式保存
+        try {
+          await CameraRoll.save(uri, {type: 'photo'});
+          return true;
+        } catch (error2) {
+          console.error('保存相册失败(备用方式):', error2);
+          Alert.alert('错误', '保存到相册失败，请重试');
+          return false;
+        }
+      }
+    }
+
+    if (permissionResult === 'never_ask_again') {
+      // 用户勾选了"不再询问"，只能引导去设置开启
+      Alert.alert(
+        '权限被拒绝',
+        '您已拒绝存储权限且不再提示，请在系统设置中手动开启权限后重试',
+        [
+          {text: '取消', style: 'cancel'},
+          {text: '去设置', onPress: openAppSettings},
+        ],
+      );
       return false;
     }
 
-    try {
-      await CameraRoll.saveAsset(uri, {type: 'photo'});
-      return true;
-    } catch (error) {
-      console.error('保存相册失败:', error);
-      // 尝试使用其他方式保存
-      try {
-        await CameraRoll.save(uri, {type: 'photo'});
-        return true;
-      } catch (error2) {
-        console.error('保存相册失败(备用方式):', error2);
-        Alert.alert('错误', '保存到相册失败，请重试');
-        return false;
-      }
-    }
+    // permissionResult === 'denied'，用户拒绝但可以再次请求
+    Alert.alert('权限不足', '请授予存储权限后重试');
+    return false;
   }
 
   // 分享图片

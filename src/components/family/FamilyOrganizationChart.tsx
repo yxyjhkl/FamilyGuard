@@ -17,7 +17,7 @@ import type {Family, Member} from '../../types';
 import {MEMBER_ROLE_LABELS} from '../../types';
 import RoleAvatar from '../common/RoleAvatar';
 import {insuranceRights} from '../../data/insuranceRights';
-import {insuranceCoverages} from '../../data/insuranceCoverages';
+import {INSURANCE_COVERAGES} from '../../constants/insurance';
 import {useFamily} from '../../hooks/useFamily';
 
 // 状态枚举
@@ -186,12 +186,12 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
     setInputValue('');
   }, []);
 
-  // 渲染单圈（保障）- 18项排列成圈
+  // 渲染单圈（保障）- 19项排列成圈
   const renderCoverageCircle = () => {
     const circleSize = 280;
     const radius = 125;
     const nodeSize = 34;
-    const total = insuranceCoverages.length;
+    const total = INSURANCE_COVERAGES.length;
     const startAngle = -Math.PI / 2;
 
     return (
@@ -200,7 +200,7 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
           styles.coverageCircleContainer,
           {width: circleSize, height: circleSize},
         ]}>
-        {insuranceCoverages.map((coverage, index) => {
+        {INSURANCE_COVERAGES.map((coverage, index) => {
           const pos = getPositionOnCircle(index, total, radius, startAngle);
           // 从 coverage 数组获取状态
           const coverageItem = member.coverage.find(c => c.type === coverage.type);
@@ -233,7 +233,7 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
             styles.centerCircleAvatar,
             {backgroundColor: getMemberAvatarColor()},
           ]}>
-          <RoleAvatar role={member.role} size={40} />
+          <RoleAvatar role={member.role} size={80} />
         </View>
       </View>
     );
@@ -300,7 +300,7 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
       {/* 成员头像和姓名 */}
       <View style={styles.memberInfo}>
         <View style={[styles.avatar, {backgroundColor: getMemberAvatarColor()}]}>
-          <RoleAvatar role={member.role} size={56} />
+          <RoleAvatar role={member.role} size={80} />
         </View>
         <Text style={styles.memberName}>{member.name}</Text>
         <Text style={styles.memberRole}>{MEMBER_ROLE_LABELS[member.role]}</Text>
@@ -421,7 +421,7 @@ const FamilyOrganizationChart: React.FC<FamilyOrganizationChartProps> = ({
       if (!member) return;
 
       // 更新 coverage 或 rights 数组
-      const isCoverageType = insuranceCoverages.some(c => c.type === type);
+      const isCoverageType = INSURANCE_COVERAGES.some(c => c.type === type);
       
       if (isCoverageType) {
         const updatedCoverage = member.coverage.map(c => {
@@ -456,7 +456,7 @@ const FamilyOrganizationChart: React.FC<FamilyOrganizationChartProps> = ({
       if (!member) return;
 
       // 更新 coverage 或 rights 数组
-      const isCoverageType = insuranceCoverages.some(c => c.type === type);
+      const isCoverageType = INSURANCE_COVERAGES.some(c => c.type === type);
       
       if (isCoverageType) {
         const updatedCoverage = member.coverage.map(c => {
@@ -666,9 +666,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -699,12 +699,12 @@ const styles = StyleSheet.create({
   },
   centerCircleAvatar: {
     position: 'absolute',
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 3,
+    borderWidth: 4,
     borderColor: colors.background[0],
   },
   nodeWrapper: {

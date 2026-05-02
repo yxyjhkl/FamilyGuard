@@ -36,7 +36,7 @@ export const MEMBER_ROLE_COLORS: Record<string, string> = {
   other: '#8E8EA0',
 };
 
-// 保障项图标颜色（18项统一规则）
+// 保障项图标颜色（19项统一规则）
 export const COVERAGE_COLORS: Record<string, string> = {
   // 寿险/身价
   death: '#8E44AD',

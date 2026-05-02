@@ -12,6 +12,7 @@ interface FamilyState {
 
 type FamilyAction =
   | {type: 'LOAD_FAMILIES'; payload: Family[]}
+  | {type: 'SET_LOADING'; payload: boolean}
   | {type: 'ADD_FAMILY'; payload: Family}
   | {type: 'UPDATE_FAMILY'; payload: Family}
   | {type: 'DELETE_FAMILY'; payload: string}
@@ -24,6 +25,9 @@ function familyReducer(state: FamilyState, action: FamilyAction): FamilyState {
   switch (action.type) {
     case 'LOAD_FAMILIES':
       return {...state, families: action.payload, loading: false};
+
+    case 'SET_LOADING':
+      return {...state, loading: action.payload};
 
     case 'ADD_FAMILY':
       return {...state, families: [...state.families, action.payload]};
@@ -138,6 +142,7 @@ function createInitialFamily(
 // ========== Context ==========
 interface FamilyContextType {
   state: FamilyState;
+  reloadFamilies: () => Promise<void>;
   addFamily: (name: string, structureType: string, structureLabel: string, members: Member[], agentInfo?: {name: string; phone: string}) => Promise<string>;
   updateFamily: (family: Family) => Promise<void>;
   deleteFamily: (id: string) => Promise<void>;
@@ -156,12 +161,9 @@ export const FamilyProvider: React.FC<{children: React.ReactNode}> = ({children}
     loading: true,
   });
 
-  // 初始加载
-  useEffect(() => {
-    loadFamilies();
-  }, []);
-
-  const loadFamilies = async () => {
+  // 初始加载（定义在使用之前，避免 TDZ）
+  const reloadFamilies = useCallback(async () => {
+    dispatch({type: 'SET_LOADING', payload: true});
     const data = await storageService.getFamilies();
     if (data) {
       try {
@@ -173,7 +175,11 @@ export const FamilyProvider: React.FC<{children: React.ReactNode}> = ({children}
     } else {
       dispatch({type: 'LOAD_FAMILIES', payload: []});
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    reloadFamilies();
+  }, [reloadFamilies]);
 
   // 自动持久化
   useEffect(() => {
@@ -226,6 +232,7 @@ export const FamilyProvider: React.FC<{children: React.ReactNode}> = ({children}
     <FamilyContext.Provider
       value={{
         state,
+        reloadFamilies,
         addFamily,
         updateFamily,
         deleteFamily,
@@ -239,10 +246,10 @@ export const FamilyProvider: React.FC<{children: React.ReactNode}> = ({children}
   );
 };
 
-export const useFamilyContext = (): FamilyContextType => {
+export const useFamily = (): FamilyContextType => {
   const context = useContext(FamilyContext);
   if (!context) {
-    throw new Error('useFamilyContext must be used within a FamilyProvider');
+    throw new Error('useFamily must be used within a FamilyProvider');
   }
   return context;
 };

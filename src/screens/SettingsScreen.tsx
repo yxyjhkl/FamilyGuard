@@ -1,5 +1,5 @@
 // src/screens/SettingsScreen.tsx
-// 设置页面 - 全局建议保额、业务员信息、金句配置
+// 设置页面 - 全局建议保额、客户经理信息、金句配置
 
 import React, {useState, useCallback} from 'react';
 import {
@@ -15,7 +15,7 @@ import {
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '../types';
 import type {CoverageType} from '../types';
-import {insuranceCoverages} from '../data/insuranceCoverages';
+import {INSURANCE_COVERAGES} from '../constants/insurance';
 import {DEFAULT_RECOMMENDED_AMOUNTS} from '../types';
 import {mottoList} from '../data/mottoList';
 import {useSettings, hasCustomAmounts, getCustomCount, isAgentInfoComplete} from '../store/settingsStore';
@@ -44,7 +44,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
   const [editingType, setEditingType] = useState<CoverageType | null>(null);
   const [editValue, setEditValue] = useState('');
 
-  // 业务员信息编辑状态
+  // 客户经理信息编辑状态
   const [agentName, setAgentName] = useState(state.agentInfo.name);
   const [agentEmployeeId, setAgentEmployeeId] = useState(state.agentInfo.employeeId);
   const [agentPhone, setAgentPhone] = useState(state.agentInfo.phone);
@@ -108,7 +108,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
     );
   }, [resetToDefaults]);
 
-  // 保存业务员信息
+  // 保存客户经理信息
   const handleSaveAgentInfo = useCallback(() => {
     setAgentInfo({
       name: agentName.trim(),
@@ -116,7 +116,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
       phone: agentPhone.trim(),
       department: agentDepartment.trim(),
     });
-    Alert.alert('保存成功', '业务员信息已保存');
+    Alert.alert('保存成功', '客户经理信息已保存');
   }, [agentName, agentEmployeeId, agentPhone, agentDepartment, setAgentInfo]);
 
   // 保存金句
@@ -193,7 +193,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
   const agentComplete = isAgentInfoComplete(state.agentInfo);
 
   // 按分类分组
-  const groupedCoverages = insuranceCoverages.reduce(
+  const groupedCoverages = INSURANCE_COVERAGES.reduce(
     (acc, item) => {
       const category = item.category;
       if (!acc[category]) {
@@ -202,7 +202,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
       acc[category].push(item);
       return acc;
     },
-    {} as Record<string, typeof insuranceCoverages>,
+    {} as Record<string, typeof INSURANCE_COVERAGES>,
   );
 
   const categoryNames: Record<string, string> = {
@@ -229,7 +229,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
       <View style={styles.tabContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
           {[
-            {key: 'agent', label: '业务员', icon: '👤'},
+            {key: 'agent', label: '客户经理', icon: '👤'},
             {key: 'coverage', label: '建议保额', icon: '💰'},
             {key: 'motto', label: '默认金句', icon: '✦'},
             {key: 'data', label: '数据管理', icon: '📦'},
@@ -249,11 +249,11 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
       </View>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* ========== 业务员信息 ========== */}
+        {/* ========== 客户经理信息 ========== */}
         {activeTab === 'agent' && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>业务员信息</Text>
+              <Text style={styles.sectionTitle}>客户经理信息</Text>
               {agentComplete && (
                 <View style={styles.statusBadge}>
                   <Text style={styles.statusText}>已完善</Text>
@@ -313,7 +313,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
               style={styles.saveButton}
               onPress={handleSaveAgentInfo}
               activeOpacity={0.8}>
-              <Text style={styles.saveButtonText}>保存业务员信息</Text>
+              <Text style={styles.saveButtonText}>保存客户经理信息</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -523,7 +523,15 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
               </View>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>版本</Text>
-                <Text style={styles.aboutValue}>1.0.0</Text>
+                <Text style={styles.aboutValue}>V1.0.2</Text>
+              </View>
+              <View style={styles.aboutItem}>
+                <Text style={styles.aboutLabel}>作者</Text>
+                <Text style={styles.aboutValue}>何克霖 2026.05.02</Text>
+              </View>
+              <View style={styles.aboutItem}>
+                <Text style={styles.aboutLabel}>版权所有</Text>
+                <Text style={styles.aboutValue}>© 2026 凡事都凑何先生 klin</Text>
               </View>
             </View>
           </View>

@@ -1,15 +1,15 @@
 // src/hooks/useFamily.ts
 import {useCallback} from 'react';
-import {useFamilyContext} from '../store/familyStore';
+import {useFamily as useFamilyStore} from '../store/familyStore';
 import {useSettings} from '../store/settingsStore';
 import type {Family, Member} from '../types';
-import {coverageOptions} from '../data/coverageOptions';
+import {INSURANCE_COVERAGES} from '../constants/insurance';
 import {rightsOptions} from '../data/rightsOptions';
 import {generateUUID} from '../utils/formatUtils';
 import {DEFAULT_RECOMMENDED_AMOUNTS} from '../types';
 
 export function useFamily() {
-  const ctx = useFamilyContext();
+  const ctx = useFamilyStore();
   const {getRecommendedAmount, state: settingsState} = useSettings();
 
   // 根据模板创建家庭
@@ -26,14 +26,14 @@ export function useFamily() {
         role: tm.role,
         name: tm.defaultName,
         age: tm.defaultAge,
-        coverage: coverageOptions
+        coverage: INSURANCE_COVERAGES
           .filter(co => co.applicableRoles.includes(tm.role))
           .map(co => {
             // 使用全局设置的建议保额
             const recommended = getRecommendedAmount(co.type);
             return {
               type: co.type,
-              label: co.label,
+              label: co.fullLabel,
               hasCoverage: false,
               coverageAmount: 0,
               recommendedAmount: recommended,
@@ -50,7 +50,7 @@ export function useFamily() {
         })),
       }));
 
-      // 业务员信息（如果已设置）
+      // 客户经理信息（如果已设置）
       const agentInfo = settingsState.agentInfo.name || settingsState.agentInfo.phone
         ? {name: settingsState.agentInfo.name, phone: settingsState.agentInfo.phone}
         : undefined;
@@ -79,6 +79,7 @@ export function useFamily() {
   return {
     families: ctx.state.families,
     loading: ctx.state.loading,
+    reloadFamilies: ctx.reloadFamilies,
     createFamilyFromTemplate,
     getFamilyById,
     addFamily: ctx.addFamily,

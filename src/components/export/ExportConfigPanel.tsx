@@ -53,10 +53,10 @@ const ExportConfigPanel: React.FC<ExportConfigPanelProps> = ({settings, onUpdate
         </View>
       </View>
 
-      {/* 业务员信息 */}
+      {/* 客户经理信息 */}
       <View style={styles.section}>
         <View style={styles.switchRow}>
-          <Text style={styles.switchLabel}>显示业务员信息</Text>
+          <Text style={styles.switchLabel}>显示客户经理信息</Text>
           <Switch
             value={settings.showAgentInfo}
             onValueChange={v => onUpdate({showAgentInfo: v})}
@@ -70,7 +70,7 @@ const ExportConfigPanel: React.FC<ExportConfigPanelProps> = ({settings, onUpdate
               style={styles.agentInput}
               value={settings.agentName}
               onChangeText={v => onUpdate({agentName: v})}
-              placeholder="业务员姓名"
+              placeholder="客户经理姓名"
               placeholderTextColor={colors.text[2]}
             />
             <TextInput

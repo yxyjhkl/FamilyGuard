@@ -16,7 +16,7 @@ import type {Family, Member} from '../../types';
 import {MEMBER_ROLE_LABELS} from '../../types';
 import RoleAvatar from '../common/RoleAvatar';
 import {insuranceRights} from '../../data/insuranceRights';
-import {insuranceCoverages} from '../../data/insuranceCoverages';
+import {INSURANCE_COVERAGES} from '../../constants/insurance';
 import {useFamily} from '../../hooks/useFamily';
 
 // 状态枚举
@@ -117,15 +117,15 @@ const MemberCoverageCard: React.FC<MemberCoverageCardProps> = ({
   return colors.functional.info;
 };
 
-  // 渲染内圈保障（完整18项，分两圈排列）
+  // 渲染内圈保障（完整19项，分两圈排列）
   const renderInnerCircle = () => {
-    const allCoverages = insuranceCoverages; // 显示全部18项保障
+    const allCoverages = INSURANCE_COVERAGES; // 显示全部19项保障
     const circleSize = 160;
     const innerRadius = 55;
     const outerRadius = 75;
     const nodeSize = 22;
-    const innerCount = 9; // 内圈9项
-    const outerCount = 9; // 外圈9项
+    const innerCount = 9;  // 内圈9项
+    const outerCount = 10; // 外圈10项（19项总计）
 
     return (
       <View style={[styles.innerCircleContainer, {width: circleSize, height: circleSize}]}>
@@ -195,7 +195,7 @@ const MemberCoverageCard: React.FC<MemberCoverageCardProps> = ({
             styles.innerCenterAvatar,
             {backgroundColor: getMemberAvatarColor()},
           ]}>
-          <RoleAvatar role={member.role} size={28} />
+          <RoleAvatar role={member.role} size={56} />
         </View>
       </View>
     );
@@ -274,7 +274,7 @@ const MemberCoverageCard: React.FC<MemberCoverageCardProps> = ({
 
       {/* 内圈保障 */}
       <View style={styles.coverageSection}>
-        <Text style={styles.sectionLabel}>保障（18项）</Text>
+        <Text style={styles.sectionLabel}>保障（19项）</Text>
         <View style={styles.coverageCircleWrapper}>
           {renderInnerCircle()}
         </View>
@@ -399,7 +399,7 @@ const FamilyCustomChart: React.FC<FamilyCustomChartProps> = ({
       if (!member) return;
 
       // 更新 coverage 或 rights 数组
-      const isCoverageType = insuranceCoverages.some(c => c.type === type);
+      const isCoverageType = INSURANCE_COVERAGES.some(c => c.type === type);
       
       if (isCoverageType) {
         const updatedCoverage = member.coverage.map(c => {
@@ -553,12 +553,12 @@ const styles = StyleSheet.create({
   },
   innerCenterAvatar: {
     position: 'absolute',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: colors.background[1],
   },
   nodeWrapper: {

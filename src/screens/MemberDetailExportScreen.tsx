@@ -19,7 +19,7 @@ import {useExport} from '../hooks/useExport';
 import {exportService} from '../services/exportService';
 import RoleAvatar from '../components/common/RoleAvatar';
 import {insuranceRights} from '../data/insuranceRights';
-import {insuranceCoverages} from '../data/insuranceCoverages';
+import {INSURANCE_COVERAGES} from '../constants/insurance';
 import {colors, spacing, borderRadius} from '../theme';
 import {maskName} from '../utils/privacyUtils';
 
@@ -102,6 +102,7 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
   const {startExport, finishExport} = useExport();
   const viewShotRef = useRef<ViewShot>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [hideName, setHideName] = useState(false); // 隐私模式
 
   const family = useMemo(() => getFamilyById(familyId), [familyId, getFamilyById]);
   const member = useMemo(() => {
@@ -136,7 +137,7 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
   const stats = useMemo(() => {
     if (!member) return {owned: 0, total: 0};
     let owned = 0;
-    const total = insuranceCoverages.length + insuranceRights.length;
+    const total = INSURANCE_COVERAGES.length + insuranceRights.length;
     // 从 coverage 数组统计已有保障
     member.coverage.forEach(c => {
       if (c.hasCoverage) owned++;
@@ -238,6 +239,12 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>个人保障详情</Text>
         <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={[styles.actionBtn, hideName && styles.actionBtnActive]}
+            onPress={() => setHideName(!hideName)}
+            activeOpacity={0.7}>
+            <Text style={[styles.actionText, hideName && styles.actionTextActive]}>🔒</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.actionBtn} onPress={handleShare} activeOpacity={0.7}>
             <Text style={styles.actionText}>分享</Text>
           </TouchableOpacity>
@@ -264,7 +271,7 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
             <View style={[styles.avatarCircle, {backgroundColor: memberColor}]}>
               <RoleAvatar role={member.role} size={56} />
             </View>
-            <Text style={styles.memberName}>{member.name}</Text>
+            <Text style={styles.memberName}>{maskName(member.name, !hideName)}</Text>
             <Text style={styles.memberRole}>{MEMBER_ROLE_LABELS[member.role]}</Text>
             
             {/* 统计 */}
@@ -283,10 +290,10 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
 
           {/* 保障圈 */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>保障配置（18项）</Text>
+            <Text style={styles.sectionTitle}>保障配置（19项）</Text>
             <View style={[styles.coverageCircle, {width: circleSize, height: circleSize}]}>
-              {insuranceCoverages.map((coverage, index) => {
-                const pos = getPositionOnCircle(index, insuranceCoverages.length, radius);
+              {INSURANCE_COVERAGES.map((coverage, index) => {
+                const pos = getPositionOnCircle(index, INSURANCE_COVERAGES.length, radius);
                 // 从 memberCoverageMap 获取状态（与 ExportOrgChartCard 一致）
                 const coverageInfo = memberCoverageMap[coverage.type];
                 const status = coverageInfo?.hasCoverage ? 'owned' : 'none';
@@ -444,6 +451,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.primary[1],
     fontWeight: '500',
+  },
+  actionBtnActive: {
+    backgroundColor: colors.primary[1] + '20',
+  },
+  actionTextActive: {
+    color: colors.primary[1],
   },
   hintBar: {
     flexDirection: 'row',

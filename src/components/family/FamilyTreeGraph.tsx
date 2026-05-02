@@ -235,7 +235,7 @@ const FamilyTreeGraph: React.FC<FamilyTreeGraphProps> = ({family, onMemberPress}
       ownedRights += member.rights?.filter(r => r.hasRight).length ?? 0;
     });
 
-    // 使用固定的总数（18项保障 + 8项权益）
+    // 使用固定的总数（19项保障 + 8项权益）
     const totalCoverage = memberCount * 18;
     const totalRights = memberCount * 8;
 

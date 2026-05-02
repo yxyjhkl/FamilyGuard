@@ -66,7 +66,7 @@ const ExportCard: React.FC<ExportCardProps> = ({
         {showAgentInfo && agentName ? (
           <View style={styles.agentInfo}>
             <Text style={styles.agentText}>
-              业务员：{agentName}
+              客户经理：{agentName}
               {agentPhone ? ` | ${agentPhone}` : ''}
             </Text>
           </View>
