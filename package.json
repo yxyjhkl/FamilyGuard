@@ -1,6 +1,6 @@
 {
   "name": "FamilyGuard",
-  "version": "2.0.10",
+  "version": "2.3.2",
   "private": true,
   "scripts": {
     "android": "react-native run-android",

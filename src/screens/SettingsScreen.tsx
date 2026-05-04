@@ -1,5 +1,5 @@
 // src/screens/SettingsScreen.tsx
-// 设置页面 - 全局建议保额、客户经理信息、金句配置
+// 设置页面 - 全局建议保额、保障配置、权益配置、客户经理信息、金句配置
 
 import React, {useState, useCallback, useEffect} from 'react';
 import {
@@ -14,6 +14,9 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
+  Switch,
+  Image,
+  Linking,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '../types';
@@ -22,8 +25,11 @@ import {INSURANCE_COVERAGES} from '../constants/insurance';
 import {mottoList} from '../data/mottoList';
 import {useSettings, hasCustomAmounts, getCustomCount, isAgentInfoComplete, getDefaultAmount} from '../store/settingsStore';
 import {aiService, AI_PROVIDERS, type AIProvider} from '../services/aiService';
+import {storageService} from '../store/storageService';
 import AppHeader from '../components/common/AppHeader';
 import {colors, typography, spacing, borderRadius} from '../theme';
+import CoverageConfigEditor from '../components/settings/CoverageConfigEditor';
+import RightConfigEditor from '../components/settings/RightConfigEditor';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
@@ -40,10 +46,11 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
     exportSettings,
     importSettings,
     clearAllData,
+    setDonationConfig,
   } = useSettings();
 
   // 状态
-  const [activeTab, setActiveTab] = useState<'coverage' | 'agent' | 'motto' | 'data' | 'ai'>('agent');
+  const [activeTab, setActiveTab] = useState<'agent' | 'coverage' | 'rights' | 'amount' | 'motto' | 'ai' | 'register' | 'data'>('agent');
   const [editingType, setEditingType] = useState<CoverageType | null>(null);
   const [editValue, setEditValue] = useState('');
 
@@ -87,15 +94,15 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
   const [agentPhone, setAgentPhone] = useState(state.agentInfo.phone);
   const [agentDepartment, setAgentDepartment] = useState(state.agentInfo.department);
 
-  // 获取有效建议保额
+  // 获取有效建议保额（与 settingsStore.getRecommendedAmount 保持一致）
   const getEffectiveAmount = useCallback(
     (type: CoverageType): number => {
-      if (state.customRecommendedAmounts[type] !== undefined) {
+      if (state.useGlobalCustom && state.customRecommendedAmounts[type] !== undefined) {
         return state.customRecommendedAmounts[type] as number;
       }
       return getDefaultAmount(type);
     },
-    [state.customRecommendedAmounts],
+    [state.useGlobalCustom, state.customRecommendedAmounts],
   );
 
   // 开始编辑保额
@@ -161,6 +168,49 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
     setDefaultMotto(motto);
     Alert.alert('保存成功', '默认金句已设置');
   }, [setDefaultMotto]);
+
+  // 打开App扫一扫
+  const handleOpenQrScanner = useCallback(async (appType: 'wechat' | 'alipay') => {
+    // App的URL Scheme
+    const schemes = {
+      wechat: {
+        scheme: 'weixin://scanQRCode',
+        name: '微信',
+        appStoreUrl: 'https://apps.apple.com/cn/app/wechat/id414478124',
+      },
+      alipay: {
+        scheme: 'alipays://platformapi/startapp?appId=20000056',
+        name: '支付宝',
+        appStoreUrl: 'https://apps.apple.com/cn/app/zhifubao/id333206289',
+      },
+    };
+
+    const app = schemes[appType];
+
+    try {
+      const canOpen = await Linking.canOpenURL(app.scheme);
+      
+      if (canOpen) {
+        await Linking.openURL(app.scheme);
+      } else {
+        // App未安装，提示安装
+        Alert.alert(
+          `${app.name}未安装`,
+          `请先安装${app.name}后再使用扫码功能`,
+          [
+            {text: '取消', style: 'cancel'},
+            {
+              text: '去下载',
+              onPress: () => Linking.openURL(app.appStoreUrl),
+            },
+          ],
+        );
+      }
+    } catch (error) {
+      console.error('打开扫码失败:', error);
+      Alert.alert('操作失败', `无法打开${app.name}扫一扫`);
+    }
+  }, []);
 
   // 保存AI配置
   const handleSaveAI = useCallback(() => {
@@ -273,6 +323,29 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
     );
   }, [clearAllData]);
 
+  // 清理废弃的短期赠险记录
+  const handleCleanupDeprecatedCoverages = useCallback(() => {
+    Alert.alert(
+      '清理废弃数据',
+      '将删除所有家庭成员中的"短期赠险"记录。此操作不可恢复。',
+      [
+        {text: '取消', style: 'cancel'},
+        {
+          text: '清理',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await storageService.cleanupDeprecatedCoverages();
+              Alert.alert('清理完成', '已删除所有废弃的短期赠险记录');
+            } catch (error) {
+              Alert.alert('清理失败', '清理数据时出现错误，请重试');
+            }
+          },
+        },
+      ],
+    );
+  }, []);
+
   // 统计信息
   const isCustom = hasCustomAmounts(state.customRecommendedAmounts);
   const customCount = getCustomCount(state.customRecommendedAmounts);
@@ -311,28 +384,48 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
         }
       />
 
-      {/* Tab 切换 */}
+      {/* Tab 切换 - 双排布局提高可见性 */}
       <View style={styles.tabContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
-          {[
-            {key: 'agent', label: '客户经理', icon: '👤'},
-            {key: 'coverage', label: '建议保额', icon: '💰'},
-            {key: 'motto', label: '默认金句', icon: '✦'},
-            {key: 'ai', label: 'AI配置', icon: '🤖'},
-            {key: 'data', label: '数据管理', icon: '📦'},
-          ].map(tab => (
+        {/* 第一排：常用功能 */}
+        <View style={styles.tabRow}>
+          {([
+            {key: 'agent' as const, label: '客户经理', icon: '👤'},
+            {key: 'coverage' as const, label: '保障项目', icon: '🛡️'},
+            {key: 'rights' as const, label: '权益项目', icon: '✨'},
+            {key: 'amount' as const, label: '建议保额', icon: '💰'},
+          ]).map(tab => (
             <TouchableOpacity
               key={tab.key}
-              style={[styles.tab, activeTab === tab.key && styles.tabActive]}
-              onPress={() => setActiveTab(tab.key as any)}
+              style={[styles.tab, styles.tabHalf, activeTab === tab.key && styles.tabActive]}
+              onPress={() => setActiveTab(tab.key)}
               activeOpacity={0.7}>
               <Text style={styles.tabIcon}>{tab.icon}</Text>
-              <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>
+              <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]} numberOfLines={1}>
                 {tab.label}
               </Text>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+        </View>
+        {/* 第二排：其他功能 */}
+        <View style={styles.tabRow}>
+          {([
+            {key: 'motto' as const, label: '默认金句', icon: '✦'},
+            {key: 'ai' as const, label: 'AI配置', icon: '🤖'},
+            {key: 'register' as const, label: '打赏作者', icon: '❤️'},
+            {key: 'data' as const, label: '数据管理', icon: '📦'},
+          ]).map(tab => (
+            <TouchableOpacity
+              key={tab.key}
+              style={[styles.tab, styles.tabQuarter, activeTab === tab.key && styles.tabActive]}
+              onPress={() => setActiveTab(tab.key)}
+              activeOpacity={0.7}>
+              <Text style={styles.tabIcon}>{tab.icon}</Text>
+              <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]} numberOfLines={1}>
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
@@ -405,8 +498,18 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
           </View>
         )}
 
-        {/* ========== 建议保额配置 ========== */}
+        {/* ========== 保障项目配置 ========== */}
         {activeTab === 'coverage' && (
+          <CoverageConfigEditor />
+        )}
+
+        {/* ========== 权益项目配置 ========== */}
+        {activeTab === 'rights' && (
+          <RightConfigEditor />
+        )}
+
+        {/* ========== 建议保额配置 ========== */}
+        {activeTab === 'amount' && (
           <>
             {/* 全局开关 */}
             <View style={styles.section}>
@@ -590,6 +693,19 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
 
               <TouchableOpacity
                 style={[styles.dataActionItem, styles.dangerAction]}
+                onPress={handleCleanupDeprecatedCoverages}
+                activeOpacity={0.7}>
+                <View style={[styles.dataActionIcon, {backgroundColor: '#FFF3E0'}]}>
+                  <Text style={styles.dataActionEmoji}>🧹</Text>
+                </View>
+                <View style={styles.dataActionContent}>
+                  <Text style={[styles.dataActionTitle, {color: '#E65100'}]}>清理废弃数据</Text>
+                  <Text style={styles.dataActionDesc}>删除历史遗留的"短期赠险"记录</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.dataActionItem, styles.dangerAction]}
                 onPress={handleClearData}
                 activeOpacity={0.7}>
                 <View style={[styles.dataActionIcon, styles.dangerIconBg]}>
@@ -610,7 +726,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
               </View>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>版本</Text>
-                <Text style={styles.aboutValue}>V2.0.10</Text>
+                <Text style={styles.aboutValue}>V2.3.2</Text>
               </View>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>作者</Text>
@@ -618,7 +734,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
               </View>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>版权所有</Text>
-                <Text style={styles.aboutValue}>© 2026 泽麟保服技术中心</Text>
+                <Text style={styles.aboutValue}>© 2026-2030 泽麟保服技术中心</Text>
               </View>
             </View>
           </View>
@@ -659,7 +775,7 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
 
               {showProviderList && (
                 <View style={styles.providerList}>
-                  {AI_PROVIDERS.filter(p => p.id !== 'custom').map(provider => (
+                  {AI_PROVIDERS.map(provider => (
                     <TouchableOpacity
                       key={provider.id}
                       style={[styles.providerItem, aiProvider === provider.id && styles.providerItemActive]}
@@ -792,6 +908,77 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
           </View>
         )}
 
+        {/* ========== 打赏作者 ========== */}
+        {activeTab === 'register' && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>☕ 打赏作者</Text>
+            </View>
+            
+            <View style={styles.coffeeCard}>
+              <View style={styles.coffeeLine}>
+                <Text style={styles.coffeeText}>如果你觉得本应用程序还不错</Text>
+                <Text style={styles.coffeeEmoji}>📱</Text>
+              </View>
+              <View style={styles.coffeeLine}>
+                <Text style={styles.coffeeText}>或者它帮助你顺利签单</Text>
+                <Text style={styles.coffeeEmoji}>📈</Text>
+              </View>
+              <View style={styles.coffeeLine}>
+                <Text style={styles.coffeeText}>或者你学到了好的话术</Text>
+                <Text style={styles.coffeeEmoji}>💡</Text>
+              </View>
+              <View style={styles.coffeeLine}>
+                <Text style={styles.coffeeText}>那您请我喝一杯咖啡怎么样？</Text>
+                <Text style={styles.coffeeEmoji}>☕</Text>
+              </View>
+              <View style={[styles.coffeeLine, styles.coffeeLineSpacer]}>
+                <Text style={styles.coffeeText}>您的支持是我持续优化的动力</Text>
+                <Text style={styles.coffeeEmoji}>🙏</Text>
+              </View>
+              <View style={styles.coffeeLine}>
+                <Text style={styles.coffeeText}>祝您万事胜意！</Text>
+                <Text style={styles.coffeeEmoji}>✨</Text>
+              </View>
+            </View>
+
+            {/* 微信收款码 */}
+            <View style={styles.donationItem}>
+              <Text style={styles.donationTitle}>💖 微信赞赏</Text>
+              <TouchableOpacity
+                onPress={() => handleOpenQrScanner('wechat')}
+                activeOpacity={0.8}>
+                <Image
+                  source={require('../../android/app/src/main/assets/weichatpay.jpg')}
+                  style={styles.donationQrCode}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+              <Text style={styles.donationHint}>点击直接打开微信扫一扫</Text>
+            </View>
+
+            {/* 支付宝收款码 */}
+            <View style={styles.donationItem}>
+              <Text style={styles.donationTitle}>🧧 支付宝收款</Text>
+              <TouchableOpacity
+                onPress={() => handleOpenQrScanner('alipay')}
+                activeOpacity={0.8}>
+                <Image
+                  source={require('../../android/app/src/main/assets/alipay.jpg')}
+                  style={styles.donationQrCode}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+              <Text style={styles.donationHint}>点击直接打开支付宝扫一扫</Text>
+            </View>
+
+            <View style={styles.coffeeThanks}>
+              <Text style={styles.coffeeThanksEmoji}>🙏</Text>
+              <Text style={styles.coffeeThanksText}>感谢您的支持与鼓励</Text>
+            </View>
+          </View>
+        )}
+
         {/* 底部提示 */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
@@ -857,11 +1044,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background[1],
     borderBottomWidth: 1,
     borderBottomColor: colors.card.border,
-  },
-  tabScroll: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+  },
+  tabRow: {
+    flexDirection: 'row',
     gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
   tab: {
     flexDirection: 'row',
@@ -871,6 +1060,206 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.round,
     backgroundColor: colors.background[2],
     gap: spacing.xs,
+  },
+  tabHalf: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  tabThird: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  tabQuarter: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  coffeeCard: {
+    backgroundColor: colors.primary[0],
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  coffeeLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
+  coffeeLineSpacer: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  coffeeText: {
+    fontSize: 15,
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  coffeeEmoji: {
+    fontSize: 16,
+    marginLeft: spacing.xs,
+  },
+  coffeeMethods: {
+    backgroundColor: colors.background[2],
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  coffeeMethodsTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text[0],
+    marginBottom: spacing.md,
+  },
+  coffeeMethodItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.card.border,
+  },
+  coffeeMethodIcon: {
+    fontSize: 24,
+    marginRight: spacing.md,
+  },
+  coffeeMethodContent: {
+    flex: 1,
+  },
+  coffeeMethodLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.text[0],
+  },
+  coffeeMethodDesc: {
+    fontSize: 12,
+    color: colors.text[2],
+    marginTop: 2,
+  },
+  coffeeThanks: {
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+  },
+  coffeeThanksEmoji: {
+    fontSize: 32,
+    marginBottom: spacing.sm,
+  },
+  coffeeThanksText: {
+    fontSize: 14,
+    color: colors.text[2],
+  },
+  // 收款码相关样式
+  editModeBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  editModeBtnText: {
+    fontSize: 14,
+    color: colors.primary[1],
+    fontWeight: '500',
+  },
+  donationItem: {
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+    padding: spacing.md,
+    backgroundColor: colors.background[2],
+    borderRadius: borderRadius.md,
+  },
+  donationTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text[0],
+    marginBottom: spacing.md,
+  },
+  donationQrCode: {
+    width: 180,
+    height: 180,
+    borderRadius: borderRadius.md,
+    backgroundColor: '#FFFFFF',
+  },
+  donationHint: {
+    fontSize: 12,
+    color: colors.text[2],
+    marginTop: spacing.sm,
+  },
+  donationEmpty: {
+    alignItems: 'center',
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  donationEmptyText: {
+    fontSize: 14,
+    color: colors.text[2],
+  },
+  copyBtn: {
+    backgroundColor: colors.primary[1],
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.round,
+    marginVertical: spacing.sm,
+  },
+  copyBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  // 编辑模式样式
+  donationEditContainer: {
+    marginTop: spacing.md,
+  },
+  donationEditTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text[0],
+    marginBottom: spacing.xs,
+  },
+  donationEditDesc: {
+    fontSize: 13,
+    color: colors.text[2],
+    marginBottom: spacing.lg,
+    lineHeight: 20,
+  },
+  donationEditItem: {
+    marginBottom: spacing.lg,
+    padding: spacing.md,
+    backgroundColor: colors.background[2],
+    borderRadius: borderRadius.md,
+  },
+  donationEditItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  donationEditItemLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.text[0],
+  },
+  donationInput: {
+    backgroundColor: colors.background[1],
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 14,
+    color: colors.text[0],
+    borderWidth: 1,
+    borderColor: colors.card.border,
+  },
+  donationEditHint: {
+    fontSize: 12,
+    color: colors.primary[1],
+    marginTop: spacing.sm,
+  },
+  saveDonationBtn: {
+    backgroundColor: colors.primary[1],
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.round,
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  saveDonationBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   tabActive: {
     backgroundColor: colors.primary[1],

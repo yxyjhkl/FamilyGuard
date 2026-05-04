@@ -3,6 +3,7 @@
 import React, {useMemo, useCallback, useRef, useState} from 'react';
 import {View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator} from 'react-native';
 import ViewShot from 'react-native-view-shot';
+import {logger} from '../utils/logger';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import type {RootStackParamList, ExportSettings, Member} from '../types';
 import {useFamily} from '../hooks/useFamily';
@@ -91,7 +92,7 @@ const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
       }
       finishExport(uri, success);
     } catch (error) {
-      console.error('保存相册失败:', error);
+      logger.error('ExportPreview', '保存相册失败', error);
       Alert.alert('错误', '保存到相册失败，请重试');
       finishExport('', false);
     } finally {
@@ -123,7 +124,7 @@ const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
       await exportService.shareToWeChat(uri);
       finishExport(uri, true);
     } catch (error) {
-      console.error('分享失败:', error);
+      logger.error('ExportPreview', '分享失败', error);
       Alert.alert('错误', '分享失败，请重试');
       finishExport('', false);
     } finally {
@@ -205,7 +206,7 @@ const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
               result: 'tmpfile',
             }}
             style={styles.viewShot}>
-            {exportStyle === 'orgChart' ? (
+            {family ? (exportStyle === 'orgChart' ? (
               <ExportOrgChartCard
                 family={family}
                 motto={exportData.motto}
@@ -228,6 +229,10 @@ const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
                 agentPhone={family.exportSettings.agentPhone}
                 aiSummary={family.exportSettings.aiSummary}
               />
+            )) : (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>家庭数据加载中...</Text>
+              </View>
             )}
           </ViewShot>
         </View>

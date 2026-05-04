@@ -18,15 +18,17 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../types';
 import { useFamily } from '../hooks/useFamily';
+import { useSettings } from '../store/settingsStore';
 import { aiService } from '../services/aiService';
-import type { FamilyAnalysisResult, MemberAnalysisResult } from '../services/aiService';
+import type { FamilyAnalysisResult, MemberAnalysisResult, SummaryStyle, LoadingState, AnalysisHistory } from '../services/aiService';
 import AppHeader from '../components/common/AppHeader';
 import { colors, typography, spacing, borderRadius } from '../theme';
+import {logger} from '../utils/logger';
 
 // ============================================
 // 骨架屏组件
 // ============================================
-const SkeletonBox: React.FC<{ width?: number | string; height?: number; borderRadius?: number; style?: any }> = ({
+const SkeletonBox: React.FC<{ width?: number | string; height?: number; borderRadius?: number; style?: import('react-native').StyleProp<import('react-native').ViewStyle> }> = ({
   width = '100%',
   height = 20,
   borderRadius = 6,
@@ -107,8 +109,10 @@ type Props = NativeStackScreenProps<RootStackParamList, 'AIAnalysis'>;
 const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
   const { familyId } = route.params;
   const { getFamilyById, updateExportSettings } = useFamily();
+  const settings = useSettings(); // 优化 #8: 获取自定义保额配置
   const [analysisResult, setAnalysisResult] = useState<FamilyAnalysisResult | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [loadingState, setLoadingState] = useState<LoadingState>('idle'); // 优化 #7: 细化加载状态
+  const [loadingMessage, setLoadingMessage] = useState(''); // 优化 #7: 加载状态消息
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [objection, setObjection] = useState('');
   const [scriptResult, setScriptResult] = useState<{
@@ -118,6 +122,9 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
     isAI?: boolean;
   } | null>(null);
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const [summaryStyle, setSummaryStyle] = useState<SummaryStyle>('professional'); // 优化 #3: 总结风格
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistory[]>([]); // 优化 #6: 历史记录
+  const [showHistory, setShowHistory] = useState(false); // 优化 #6: 显示历史
   const viewShotRef = useRef<ViewShot>(null);
   
   // 截图分享功能
@@ -133,9 +140,10 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
           title: '家庭保障分析报告',
         });
       }
-    } catch (error: any) {
-      if (error?.message !== 'User did not share') {
-        console.error('分享失败:', error);
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : '';
+      if (!errMsg.includes('User did not share')) {
+        logger.error('AIAnalysis', '分享失败', error);
         Alert.alert('分享失败', '请重试');
       }
     }
@@ -153,60 +161,97 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const family = useMemo(() => getFamilyById(familyId), [familyId, getFamilyById]);
 
+  // 辅助函数：句子截断（优化 #4）
+  const truncateToSentence = useCallback((text: string, maxLength: number) => {
+    if (text.length <= maxLength) return text;
+    const sentenceEnders = /[。！？；\n]/g;
+    let lastEndIndex = -1;
+    let match;
+    while ((match = sentenceEnders.exec(text)) !== null) {
+      if (match.index <= maxLength) {
+        lastEndIndex = match.index + 1;
+      } else {
+        break;
+      }
+    }
+    if (lastEndIndex > 0) {
+      return text.slice(0, lastEndIndex);
+    }
+    return text.slice(0, maxLength - 3) + '...';
+  }, []);
+
+  // 加载历史记录（优化 #6）
+  useEffect(() => {
+    if (familyId) {
+      const history = aiService.getAnalysisHistory(familyId);
+      setAnalysisHistory(history);
+    }
+  }, [familyId]);
+
   // 执行本地分析
   const handleLocalAnalysis = useCallback(async () => {
     if (!family) return;
 
-    setIsAnalyzing(true);
+    setLoadingState('analyzing'); // 优化 #7: 细化加载状态
+    setLoadingMessage('正在分析保障数据...');
     try {
       // 本地分析（无需API）
       const result = aiService.analyzeFamily(family);
       setAnalysisResult(result);
       setSelectedMember(null);
       
-      // 生成并保存 AI 总结
-      const summaryText = `【${family.name}家庭保障分析】
+      // 生成并保存 AI 总结（使用句子截断，替代硬截断）
+      const summaryText = truncateToSentence(`【${family.name}家庭保障分析】
 综合评分: ${result.familyProtectionScore}分
 家庭保费: ${result.familyPremiumTotal.toLocaleString()}元/年
 
 保障缺口: ${result.totalGaps}项（高优先级${result.highPriorityGaps}项）
 
-💡建议: ${result.overallAdvice}`.slice(0, 300);
+💡建议: ${result.overallAdvice}`, 300);
       
       await updateExportSettings(familyId, { aiSummary: summaryText });
+      setLoadingState('complete');
     } catch (error) {
-      console.error('分析失败:', error);
-    } finally {
-      setIsAnalyzing(false);
+      logger.error('AIAnalysis', '分析失败', error);
+      setLoadingState('error');
     }
-  }, [family, familyId, updateExportSettings]);
+  }, [family, familyId, updateExportSettings, truncateToSentence]);
 
   // AI增强分析（需要API Key）
   const handleAIAnalysis = useCallback(async () => {
     if (!family) return;
 
-    setIsAnalyzing(true);
+    setLoadingState('analyzing'); // 优化 #7: 细化加载状态
+    setLoadingMessage('正在分析保障数据...');
     try {
-      const result = await aiService.analyzeWithAI(family);
+      // 优化 #8: 传递自定义保额配置
+      const customAmounts = settings?.state?.customRecommendedAmounts;
+      
+      setLoadingMessage('正在生成AI分析...');
+      const result = await aiService.analyzeWithAI(family, {
+        summaryStyle, // 优化 #3: 总结风格
+        customRecommendedAmounts: customAmounts,
+      });
+      
       setAnalysisResult(result);
       setSelectedMember(null);
       
-      // 保存 AI 总结
-      const summaryText = `【${family.name}家庭保障分析】
+      // 保存 AI 总结（使用句子截断）
+      const summaryText = truncateToSentence(`【${family.name}家庭保障分析】
 AI智能分析结果
 
 综合评分: ${result.familyProtectionScore}分
 保障缺口: ${result.totalGaps}项
 
-${result.aiSummary || result.overallAdvice}`.slice(0, 300);
+${result.aiSummary || result.overallAdvice}`, 300);
       
       await updateExportSettings(familyId, { aiSummary: summaryText });
+      setLoadingState('complete');
     } catch (error) {
-      console.error('AI分析失败:', error);
-    } finally {
-      setIsAnalyzing(false);
+      logger.error('AIAnalysis', 'AI分析失败', error);
+      setLoadingState('error');
     }
-  }, [family, familyId, updateExportSettings]);
+  }, [family, familyId, updateExportSettings, summaryStyle, settings, truncateToSentence]);
 
   // 本地生成话术
   const handleLocalScript = useCallback(() => {
@@ -246,7 +291,7 @@ ${result.aiSummary || result.overallAdvice}`.slice(0, 300);
 
   // 获取风险颜色
   const getRiskColor = (score: number) => {
-    if (score >= 70) return colors.functional.error;
+    if (score >= 70) return colors.functional.danger;
     if (score >= 40) return colors.functional.warning;
     return colors.functional.success;
   };
@@ -254,7 +299,7 @@ ${result.aiSummary || result.overallAdvice}`.slice(0, 300);
   // 获取优先级标签颜色
   const getPriorityColor = (priority: 'high' | 'medium' | 'low') => {
     switch (priority) {
-      case 'high': return colors.functional.error;
+      case 'high': return colors.functional.danger;
       case 'medium': return colors.functional.warning;
       case 'low': return colors.functional.success;
     }
@@ -286,17 +331,43 @@ ${result.aiSummary || result.overallAdvice}`.slice(0, 300);
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {/* 分析按钮区 - 无分析结果且非加载中时显示 */}
-        {!analysisResult && !isAnalyzing && (
+        {!analysisResult && loadingState === 'idle' && (
             <View style={styles.actionSection}>
             <Text style={styles.sectionTitle}>保障检视分析</Text>
             <Text style={styles.sectionDesc}>
               基于19项保障标准，为您的{family.name}进行智能分析
             </Text>
 
+            {/* 优化 #3: 总结风格选择器 */}
+            <View style={styles.styleSelector}>
+              <Text style={styles.styleLabel}>AI总结风格：</Text>
+              <View style={styles.styleButtons}>
+                {(['professional', 'simple', 'concise'] as SummaryStyle[]).map(style => (
+                  <TouchableOpacity
+                    key={style}
+                    style={[
+                      styles.styleButton,
+                      summaryStyle === style && styles.styleButtonActive,
+                    ]}
+                    onPress={() => setSummaryStyle(style)}
+                  >
+                    <Text
+                      style={[
+                        styles.styleButtonText,
+                        summaryStyle === style && styles.styleButtonTextActive,
+                      ]}
+                    >
+                      {style === 'professional' ? '专业' : style === 'simple' ? '通俗' : '简洁'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={handleLocalAnalysis}
-              disabled={isAnalyzing}
+              disabled={loadingState !== 'idle'}
             >
               <Text style={styles.primaryButtonIcon}>📊</Text>
               <Text style={styles.primaryButtonText}>本地智能分析</Text>
@@ -306,7 +377,7 @@ ${result.aiSummary || result.overallAdvice}`.slice(0, 300);
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={handleAIAnalysis}
-                disabled={isAnalyzing}
+                disabled={loadingState !== 'idle'}
               >
                 <Text style={styles.secondaryButtonIcon}>🤖</Text>
                 <Text style={styles.secondaryButtonText}>AI增强分析</Text>
@@ -323,11 +394,20 @@ ${result.aiSummary || result.overallAdvice}`.slice(0, 300);
           </View>
         )}
 
-        {/* 加载骨架屏 - 分析中时显示 */}
-        {isAnalyzing && (
+        {/* 加载骨架屏 - 分析中时显示（优化 #7: 细化加载状态） */}
+        {loadingState !== 'idle' && loadingState !== 'complete' && (
           <View style={styles.skeletonSection}>
             <View style={styles.skeletonHeader}>
-              <Text style={styles.skeletonTitle}>正在分析中...</Text>
+              <Text style={styles.skeletonTitle}>{loadingMessage}</Text>
+              {loadingState === 'analyzing' && (
+                <Text style={styles.skeletonSubtitle}>正在处理家庭保障数据...</Text>
+              )}
+              {loadingState === 'generating' && (
+                <Text style={styles.skeletonSubtitle}>正在调用AI模型...</Text>
+              )}
+              {loadingState === 'error' && (
+                <Text style={[styles.skeletonSubtitle, styles.errorText]}>分析失败，请重试</Text>
+              )}
             </View>
             <OverviewSkeleton />
             <MemberAnalysisSkeleton count={family.members.length} />
@@ -342,12 +422,50 @@ ${result.aiSummary || result.overallAdvice}`.slice(0, 300);
             <View style={styles.overviewCard}>
               <View style={styles.overviewHeader}>
                 <Text style={styles.overviewTitle}>整体分析</Text>
-                <View style={[styles.riskBadge, { backgroundColor: getRiskColor(analysisResult.overallRiskScore) + '20' }]}>
-                  <Text style={[styles.riskScore, { color: getRiskColor(analysisResult.overallRiskScore) }]}>
-                    {analysisResult.overallRiskScore}分
-                  </Text>
+                <View style={styles.overviewActions}>
+                  {/* 优化 #6: 历史对比按钮 */}
+                  {analysisHistory.length > 0 && (
+                    <TouchableOpacity
+                      style={styles.historyButton}
+                      onPress={() => setShowHistory(!showHistory)}
+                    >
+                      <Text style={styles.historyButtonText}>
+                        📈 历史({analysisHistory.length})
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  <View style={[styles.riskBadge, { backgroundColor: getRiskColor(analysisResult.overallRiskScore) + '20' }]}>
+                    <Text style={[styles.riskScore, { color: getRiskColor(analysisResult.overallRiskScore) }]}>
+                      {analysisResult.overallRiskScore}分
+                    </Text>
+                  </View>
                 </View>
               </View>
+
+              {/* 优化 #6: 历史对比面板 */}
+              {showHistory && analysisHistory.length > 0 && (
+                <View style={styles.historyPanel}>
+                  <Text style={styles.historyPanelTitle}>📊 历史对比</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {analysisHistory.slice(0, 5).map((h, idx) => (
+                      <View key={h.id} style={styles.historyItem}>
+                        <Text style={styles.historyDate}>
+                          {new Date(h.date).toLocaleDateString()}
+                        </Text>
+                        <Text style={styles.historyScore}>
+                          {h.score}分
+                          {idx === 0 && analysisResult && h.score !== analysisResult.familyProtectionScore && (
+                            <Text style={analysisResult.familyProtectionScore > h.score ? styles.scoreUp : styles.scoreDown}>
+                              {' '}({analysisResult.familyProtectionScore > h.score ? '↑' : '↓'}{Math.abs(analysisResult.familyProtectionScore - h.score)})
+                            </Text>
+                          )}
+                        </Text>
+                        <Text style={styles.historyGaps}>缺口: {h.gaps}</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
               <View style={styles.statsRow}>
                 <View style={styles.statItem}>
                   <Text style={styles.statValue}>{analysisResult.totalGaps}</Text>
@@ -355,7 +473,7 @@ ${result.aiSummary || result.overallAdvice}`.slice(0, 300);
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statValue, { color: colors.functional.error }]}>
+                  <Text style={[styles.statValue, { color: colors.functional.danger }]}>
                     {analysisResult.highPriorityGaps}
                   </Text>
                   <Text style={styles.statLabel}>高优先级</Text>
@@ -704,6 +822,11 @@ const styles = StyleSheet.create({
     ...typography.subheading,
     color: colors.text[0],
   },
+  overviewActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   riskBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -717,6 +840,99 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     marginBottom: spacing.md,
+  },
+
+  // 优化 #3: 总结风格选择器
+  styleSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.sm,
+  },
+  styleLabel: {
+    fontSize: 13,
+    color: colors.text[2],
+    marginRight: spacing.sm,
+  },
+  styleButtons: {
+    flexDirection: 'row',
+    flex: 1,
+    gap: spacing.xs,
+  },
+  styleButton: {
+    flex: 1,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.background[1],
+    borderWidth: 1,
+    borderColor: colors.card.border,
+    alignItems: 'center',
+  },
+  styleButtonActive: {
+    backgroundColor: colors.primary[1] + '15',
+    borderColor: colors.primary[1],
+  },
+  styleButtonText: {
+    fontSize: 12,
+    color: colors.text[2],
+  },
+  styleButtonTextActive: {
+    color: colors.primary[1],
+    fontWeight: '600',
+  },
+
+  // 优化 #6: 历史对比
+  historyButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: colors.primary[2] + '20',
+    borderRadius: borderRadius.sm,
+  },
+  historyButtonText: {
+    fontSize: 12,
+    color: colors.primary[1],
+  },
+  historyPanel: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.card.border,
+  },
+  historyPanelTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text[1],
+    marginBottom: spacing.sm,
+  },
+  historyItem: {
+    backgroundColor: colors.background[0],
+    borderRadius: borderRadius.sm,
+    padding: spacing.sm,
+    marginRight: spacing.sm,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  historyDate: {
+    fontSize: 11,
+    color: colors.text[2],
+    marginBottom: 2,
+  },
+  historyScore: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary[1],
+  },
+  historyGaps: {
+    fontSize: 11,
+    color: colors.text[2],
+    marginTop: 2,
+  },
+  scoreUp: {
+    color: colors.functional.success,
+  },
+  scoreDown: {
+    color: colors.functional.danger,
   },
   statItem: {
     alignItems: 'center',
@@ -870,14 +1086,14 @@ const styles = StyleSheet.create({
   },
   gapBadge: {
     marginLeft: 'auto',
-    backgroundColor: colors.functional.error + '15',
+    backgroundColor: colors.functional.danger + '15',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 4,
   },
   gapBadgeText: {
     fontSize: 11,
-    color: colors.functional.error,
+    color: colors.functional.danger,
     fontWeight: '600',
   },
 
@@ -951,7 +1167,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   shareButton: {
-    backgroundColor: colors.success?.[1] || '#34C759',
+    backgroundColor: colors.functional.success,
     marginRight: spacing.xs,
   },
   bottomButtonText: {
@@ -1062,9 +1278,20 @@ const styles = StyleSheet.create({
   skeletonSection: {
     padding: spacing.lg,
   },
+  skeletonHeader: {
+    marginBottom: spacing.md,
+  },
   skeletonTitle: {
     fontSize: 14,
     color: colors.text[2],
+  },
+  skeletonSubtitle: {
+    fontSize: 12,
+    color: colors.text[2],
+    marginTop: 4,
+  },
+  errorText: {
+    color: colors.functional.danger,
   },
   skeletonContainer: {
     gap: spacing.md,

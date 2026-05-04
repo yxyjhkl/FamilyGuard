@@ -1,14 +1,16 @@
 // src/components/export/RightsSummary.tsx
-import React from 'react';
+import React, {useMemo} from 'react';
 import {View, Text, StyleSheet} from 'react-native';
 import {colors, typography, spacing, borderRadius} from '../../theme';
-import type {Right} from '../../types';
+import type {MemberRight} from '../../types';
+import {useSettings} from '../../store/settingsStore';
 
 interface RightsSummaryProps {
-  rights: Right[];
+  rights: MemberRight[];
 }
 
 const RightsSummary: React.FC<RightsSummaryProps> = ({rights}) => {
+  const {getRightConfig} = useSettings();
   const activeRights = rights.filter(r => r.hasRight);
 
   if (activeRights.length === 0) {
@@ -23,14 +25,18 @@ const RightsSummary: React.FC<RightsSummaryProps> = ({rights}) => {
     <View style={styles.container}>
       <Text style={styles.sectionLabel}>保险权益：</Text>
       <View style={styles.tags}>
-        {activeRights.map(right => (
-          <View key={right.type} style={styles.tag}>
-            <Text style={styles.tagText}>
-              {right.label}
-              {right.validityDate ? `(至${right.validityDate})` : ''}
-            </Text>
-          </View>
-        ))}
+        {activeRights.map(right => {
+          const config = getRightConfig(right.id);
+          const label = config?.label || right.id;
+          return (
+            <View key={right.id} style={styles.tag}>
+              <Text style={styles.tagText}>
+                {label}
+                {right.validityDate ? `(至${right.validityDate})` : ''}
+              </Text>
+            </View>
+          );
+        })}
       </View>
     </View>
   );

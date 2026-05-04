@@ -65,6 +65,43 @@ const ROLE_CONFIG: Record<MemberRole, {
     skinColor: '#FFE4C4',
     hairColor: '#E0E0E0', // 白发
   },
+  // 新增角色配置
+  father_in_law: {
+    headColor: '#4A90D9',
+    bodyColor: '#3B7AC4',
+    skinColor: '#FFDBB4',
+    hairColor: '#9E9E9E', // 中年灰发
+  },
+  mother_in_law: {
+    headColor: '#E91E63',
+    bodyColor: '#C2185B',
+    skinColor: '#FFE4C4',
+    hairColor: '#9E9E9E',
+  },
+  brother: {
+    headColor: '#3498DB',
+    bodyColor: '#2980B9',
+    skinColor: '#FFDBB4',
+    hairColor: '#3D3D3D',
+  },
+  sister: {
+    headColor: '#9B59B6',
+    bodyColor: '#8E44AD',
+    skinColor: '#FFE4C4',
+    hairColor: '#5D4037',
+  },
+  son_in_law: {
+    headColor: '#3498DB',
+    bodyColor: '#2980B9',
+    skinColor: '#FFDBB4',
+    hairColor: '#3D3D3D',
+  },
+  daughter_in_law: {
+    headColor: '#E91E63',
+    bodyColor: '#C2185B',
+    skinColor: '#FFE4C4',
+    hairColor: '#5D4037',
+  },
   other: {
     headColor: '#95A5A6',
     bodyColor: '#7F8C8D',
@@ -406,9 +443,15 @@ const RoleAvatar: React.FC<RoleAvatarProps> = ({role, size = 60}) => {
   switch (role) {
     case 'husband':
     case 'father':
+    case 'father_in_law':
+    case 'brother':
+    case 'son_in_law':
       return <MaleAvatar size={size} config={config} />;
     case 'wife':
     case 'mother':
+    case 'mother_in_law':
+    case 'sister':
+    case 'daughter_in_law':
       return <FemaleAvatar size={size} config={config} />;
     case 'son':
       return <SonAvatar size={size} config={config} />;

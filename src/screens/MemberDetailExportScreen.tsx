@@ -1,6 +1,7 @@
 // src/screens/MemberDetailExportScreen.tsx
 // 成员保障权益详情导出页面 - 支持三指下滑截图
 import React, {useMemo, useCallback, useRef, useState} from 'react';
+import {logger} from '../utils/logger';
 import {
   View,
   Text,
@@ -20,10 +21,11 @@ import {useFamily} from '../hooks/useFamily';
 import {useExport} from '../hooks/useExport';
 import {exportService} from '../services/exportService';
 import RoleAvatar from '../components/common/RoleAvatar';
-import {insuranceRights} from '../data/insuranceRights';
-import {INSURANCE_COVERAGES} from '../constants/insurance';
 import {colors, spacing, borderRadius} from '../theme';
 import {maskName} from '../utils/privacyUtils';
+import {useSettings} from '../store/settingsStore';
+import {DEFAULT_COVERAGES} from '../data/defaultCoverages';
+import {DEFAULT_RIGHTS} from '../data/defaultRights';
 
 const {width: SCREEN_WIDTH} = Dimensions.get('window');
 
@@ -106,6 +108,11 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
   const [isExporting, setIsExporting] = useState(false);
   const [hideName, setHideName] = useState(false); // 隐私模式
 
+  // 从设置中获取动态保障和权益配置
+  const {customCoverages, customRights} = useSettings();
+  const coverages = Array.isArray(customCoverages) && customCoverages.length > 0 ? customCoverages : DEFAULT_COVERAGES;
+  const rights = Array.isArray(customRights) && customRights.length > 0 ? customRights : DEFAULT_RIGHTS;
+
   const family = useMemo(() => getFamilyById(familyId), [familyId, getFamilyById]);
   const member = useMemo(() => {
     if (!family) return null;
@@ -117,7 +124,7 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
     if (!member) return {};
     const map: {[key: string]: {hasCoverage: boolean; coverageAmount?: number}} = {};
     member.coverage.forEach(c => {
-      map[c.type] = {hasCoverage: c.hasCoverage, coverageAmount: c.coverageAmount};
+      map[c.id] = {hasCoverage: c.hasCoverage, coverageAmount: c.coverageAmount};
     });
     return map;
   }, [member]);
@@ -127,7 +134,7 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
     if (!member) return {};
     const map: {[key: string]: {hasRight: boolean; validityDate?: string}} = {};
     member.rights.forEach(r => {
-      map[r.type] = {hasRight: r.hasRight, validityDate: r.validityDate};
+      map[r.id] = {hasRight: r.hasRight, validityDate: r.validityDate};
     });
     return map;
   }, [member]);
@@ -139,13 +146,13 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
   const stats = useMemo(() => {
     if (!member) return {owned: 0, total: 0};
     let owned = 0;
-    const total = INSURANCE_COVERAGES.length + insuranceRights.length;
+    const total = coverages.length + rights.length;
     // 从 coverage 数组统计已有保障
     member.coverage.forEach(c => {
       if (c.hasCoverage) owned++;
     });
     return {owned, total};
-  }, [member]);
+  }, [member, coverages, rights]);
 
   // 返回
   const handleGoBack = useCallback(() => {
@@ -178,7 +185,7 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
       }
       finishExport(uri, success);
     } catch (error) {
-      console.error('保存失败:', error);
+      logger.error('MemberDetailExport', '保存失败', error);
       Alert.alert('错误', '保存失败，请重试');
       finishExport('', false);
     } finally {
@@ -209,7 +216,7 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
       await exportService.shareToWeChat(uri);
       finishExport(uri, true);
     } catch (error) {
-      console.error('分享失败:', error);
+      logger.error('MemberDetailExport', '分享失败', error);
       Alert.alert('错误', '分享失败，请重试');
       finishExport('', false);
     } finally {
@@ -292,17 +299,17 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
 
           {/* 保障圈 */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>保障配置（19项）</Text>
+            <Text style={styles.sectionTitle}>保障配置（{coverages.length}项）</Text>
             <View style={[styles.coverageCircle, {width: circleSize, height: circleSize}]}>
-              {INSURANCE_COVERAGES.map((coverage, index) => {
-                const pos = getPositionOnCircle(index, INSURANCE_COVERAGES.length, radius);
+              {coverages.map((coverage, index) => {
+                const pos = getPositionOnCircle(index, coverages.length, radius);
                 // 从 memberCoverageMap 获取状态（与 ExportOrgChartCard 一致）
-                const coverageInfo = memberCoverageMap[coverage.type];
+                const coverageInfo = memberCoverageMap[coverage.id];
                 const status = coverageInfo?.hasCoverage ? 'owned' : 'none';
 
                 return (
                   <View
-                    key={coverage.type}
+                    key={coverage.id}
                     style={[
                       styles.nodeWrapper,
                       {
@@ -333,15 +340,15 @@ const MemberDetailExportScreen: React.FC<Props> = ({route, navigation}) => {
 
           {/* 权益 */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>权益服务（8项）</Text>
+            <Text style={styles.sectionTitle}>权益服务（{rights.length}项）</Text>
             <View style={styles.rightsGrid}>
-              {insuranceRights.map(right => {
+              {rights.map(right => {
                 // 从 memberRightsMap 获取状态
-                const rightsInfo = memberRightsMap[right.type];
+                const rightsInfo = memberRightsMap[right.id];
                 const status = rightsInfo?.hasRight ? 'owned' : 'none';
 
                 return (
-                  <View key={right.type} style={styles.rightItem}>
+                  <View key={right.id} style={styles.rightItem}>
                     <View
                       style={[
                         styles.rightDot,
@@ -574,7 +581,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   circleNodeText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '700',
   },
   amountText: {
@@ -617,7 +624,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   rightDotText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '700',
   },
   rightLabel: {

@@ -4,6 +4,7 @@ import {Alert, Linking, Platform, PermissionsAndroid} from 'react-native';
 import {CameraRoll} from '@react-native-camera-roll/camera-roll';
 import Share from 'react-native-share';
 import ViewShot from 'react-native-view-shot';
+import {logger} from '../utils/logger';
 
 // 引导用户去设置页面开启权限
 function openAppSettings(): void {
@@ -72,7 +73,7 @@ class ExportService {
         return 'denied';
       }
     } catch (err) {
-      console.warn('存储权限请求失败:', err);
+      logger.warn('ExportService', '存储权限请求失败', err);
       return 'denied';
     }
   }
@@ -88,7 +89,7 @@ class ExportService {
       const uri = await this.viewShotRef.capture?.();
       return uri ?? null;
     } catch (error) {
-      console.error('截图失败:', error);
+      logger.error('ExportService', '截图失败', error);
       Alert.alert('错误', '截图失败，请重试');
       return null;
     }
@@ -104,13 +105,13 @@ class ExportService {
         await CameraRoll.saveAsset(uri, {type: 'photo'});
         return true;
       } catch (error) {
-        console.error('保存相册失败:', error);
+        logger.error('ExportService', '保存相册失败', error);
         // 尝试使用其他方式保存
         try {
           await CameraRoll.save(uri, {type: 'photo'});
           return true;
         } catch (error2) {
-          console.error('保存相册失败(备用方式):', error2);
+          logger.error('ExportService', '保存相册失败(备用方式)', error2);
           Alert.alert('错误', '保存到相册失败，请重试');
           return false;
         }
@@ -145,12 +146,13 @@ class ExportService {
         message: '这是我的家庭保障检视图，快来看看吧！',
         subject: '家庭保障检视图',
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       // 用户取消分享不算错误
-      if (error?.message?.includes('User did not share')) {
+      const errMsg = error instanceof Error ? error.message : '';
+      if (errMsg.includes('User did not share')) {
         return;
       }
-      console.error('分享失败:', error);
+      logger.error('ExportService', '分享失败', error);
       Alert.alert('错误', '分享失败，请重试');
     }
   }

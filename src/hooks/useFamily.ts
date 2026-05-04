@@ -2,38 +2,43 @@
 import {useCallback} from 'react';
 import {useFamily as useFamilyStore} from '../store/familyStore';
 import {useSettings} from '../store/settingsStore';
-import type {Family, Member} from '../types';
-import {INSURANCE_COVERAGES} from '../constants/insurance';
-import {rightsOptions} from '../data/rightsOptions';
+import type {Family, Member, FamilyStructureType} from '../types';
 import {generateUUID} from '../utils/formatUtils';
-import {DEFAULT_RECOMMENDED_AMOUNTS} from '../types';
 
 export function useFamily() {
   const ctx = useFamilyStore();
-  const {getRecommendedAmount, state: settingsState} = useSettings();
+  const {
+    getRecommendedAmount,
+    state: settingsState,
+    getActiveCoverages,
+    getActiveRights,
+  } = useSettings();
 
   // 根据模板创建家庭
   const createFamilyFromTemplate = useCallback(
     async (
       familyName: string,
-      structureType: string,
+      structureType: FamilyStructureType,
       structureLabel: string,
       templateMembers: {role: Member['role']; defaultName: string; defaultAge: number}[],
     ): Promise<string> => {
+      const activeCoverages = getActiveCoverages();
+      const activeRights = getActiveRights();
+
       const members: Member[] = templateMembers.map(tm => ({
         id: generateUUID(),
         familyId: '',
         role: tm.role,
         name: tm.defaultName,
         age: tm.defaultAge,
-        coverage: INSURANCE_COVERAGES
-          .filter(co => co.applicableRoles.includes(tm.role))
+        // 使用动态保障配置
+        coverage: activeCoverages
+          .filter(co => co.isDefault) // 默认项都添加
           .map(co => {
             // 使用全局设置的建议保额
-            const recommended = getRecommendedAmount(co.type);
+            const recommended = co.recommendedAmount;
             return {
-              type: co.type,
-              label: co.fullLabel,
+              id: co.id,
               hasCoverage: false,
               coverageAmount: 0,
               recommendedAmount: recommended,
@@ -41,9 +46,9 @@ export function useFamily() {
               policyDetails: '',
             };
           }),
-        rights: rightsOptions.map(r => ({
-          type: r.type,
-          label: r.label,
+        // 使用动态权益配置
+        rights: activeRights.map(r => ({
+          id: r.id,
           hasRight: false,
           validityDate: '',
           notes: '',
@@ -66,7 +71,7 @@ export function useFamily() {
 
       return familyId;
     },
-    [ctx, getRecommendedAmount, settingsState.agentInfo],
+    [ctx, getActiveCoverages, getActiveRights, settingsState.agentInfo],
   );
 
   const getFamilyById = useCallback(

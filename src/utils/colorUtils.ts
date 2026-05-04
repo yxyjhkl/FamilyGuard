@@ -41,11 +41,11 @@ export const COVERAGE_COLORS: Record<string, string> = {
   // 寿险/身价
   death: '#8E44AD',
   pension: '#E67E22',
-  // 重疾类
-  criticalIllness: '#E74C3C',
-  moderateIllness: '#C0392B',
-  minorIllness: '#E74C3C',
-  specificCritical: '#D35400',
+  // 重疾类（紫色系，与已理赔红色区分）
+  criticalIllness: '#8E44AD',
+  moderateIllness: '#9B59B6',
+  minorIllness: '#BB8FCE',
+  specificCritical: '#7D3C98',
   proton: '#16A085',
   // 意外类
   accident: '#7F8C8D',
@@ -60,5 +60,5 @@ export const COVERAGE_COLORS: Record<string, string> = {
   education: '#27AE60',
   waiver: '#00B894',
   schoolAccident: '#00CEC9',
-  shortTermFree: '#A29BFE',
+  longTermCare: '#A29BFE',
 };

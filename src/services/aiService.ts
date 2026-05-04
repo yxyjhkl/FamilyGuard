@@ -1,9 +1,39 @@
 // src/services/aiService.ts
 // AI服务接口 - 支持多种预设提供商及自定义API
+import React from 'react';
 import { Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import type {Family, FamilyMember, InsuranceProduct} from '../types';
-import { getCoverageScore, getFamilyProtectionScore } from '../utils/insuranceCalculator';
+import type {Family, FamilyMember, InsuranceProduct, Member, MemberCoverage} from '../types';
+import { MEMBER_ROLE_LABELS } from '../types';
+import { DEFAULT_COVERAGES } from '../data/defaultCoverages';
+import {logger} from '../utils/logger';
+import {storageService} from '../store/storageService';
+
+const MODULE = 'AIService';
+
+// ============================================
+// 优化 #3: 总结风格类型
+// ============================================
+export type SummaryStyle = 'professional' | 'simple' | 'concise';
+
+// 优化 #7: 加载状态类型
+export type LoadingState = 'idle' | 'analyzing' | 'generating' | 'complete' | 'error';
+
+// 优化 #1: 缓存结果类型
+interface CacheEntry {
+  result: FamilyAnalysisResult;
+  timestamp: number;
+}
+
+// 优化 #6: 历史记录类型
+export interface AnalysisHistory {
+  id: string;
+  familyId: string;
+  date: string;
+  score: number;
+  gaps: number;
+  summary: string;
+  aiSummary?: string;
+}
 
 // ============================================
 // AI提供商预设配置
@@ -222,18 +252,101 @@ export interface FamilyAnalysisResult {
 }
 
 // ============================================
-// 存储键名
-// ============================================
-const AI_CONFIG_KEY = '@family_guard_ai_config';
-const ANALYSIS_HISTORY_KEY = '@family_guard_analysis_history';
-const SPEECH_HISTORY_KEY = '@family_guard_speech_history';
-
-// ============================================
 // AI服务类
 // ============================================
 class AIService {
   private runtimeConfig: AIRuntimeConfig | null = null;
   private userConfig: AIUserConfig | null = null;
+
+  // 优化 #1: 分析结果缓存（基于 family hash）
+  private analysisCache: Map<string, CacheEntry> = new Map();
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 缓存有效期 5 分钟
+
+  // 优化 #6: 分析历史记录
+  private analysisHistory: Map<string, AnalysisHistory[]> = new Map();
+  private readonly MAX_HISTORY_COUNT = 10; // 最多保存 10 条历史
+
+  // ----------------------------------------
+  // 优化 #4: 按句子截断文本
+  // ----------------------------------------
+  private truncateToSentence(text: string, maxLength: number): string {
+    if (text.length <= maxLength) return text;
+
+    // 找到最后一个完整句子结束位置
+    const sentenceEnders = /[。！？；\n]/g;
+    let lastEndIndex = -1;
+    let match;
+
+    while ((match = sentenceEnders.exec(text)) !== null) {
+      if (match.index <= maxLength) {
+        lastEndIndex = match.index + 1;
+      } else {
+        break;
+      }
+    }
+
+    if (lastEndIndex > 0) {
+      return text.slice(0, lastEndIndex);
+    }
+
+    // 如果没有找到句子结束符，尝试在最后一个完整词处截断
+    const lastSpace = text.lastIndexOf(' ', maxLength);
+    if (lastSpace > maxLength * 0.7) {
+      return text.slice(0, lastSpace) + '...';
+    }
+
+    // 最坏情况：直接截断
+    return text.slice(0, maxLength - 3) + '...';
+  }
+
+  // 优化 #1: 计算 family 数据的 hash 值
+  private computeFamilyHash(family: Family): string {
+    const data = JSON.stringify({
+      id: family.id,
+      members: family.members?.map(m => ({
+        id: m.id,
+        name: m.name,
+        role: m.role,
+        age: m.age,
+        coverage: m.coverage,
+        rights: m.rights,
+        claimedItems: m.claimedItems,
+      })),
+      version: '1.0', // 版本号用于缓存失效
+    });
+
+    // 简单的 hash 实现
+    let hash = 0;
+    for (let i = 0; i < data.length; i++) {
+      const char = data.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(36);
+  }
+
+  // 优化 #6: 保存分析历史
+  private saveAnalysisHistory(result: FamilyAnalysisResult): void {
+    const historyEntry: AnalysisHistory = {
+      id: result.id,
+      familyId: result.familyId,
+      date: result.date,
+      score: result.familyProtectionScore,
+      gaps: result.totalGaps,
+      summary: result.overallAdvice,
+      aiSummary: result.aiSummary,
+    };
+
+    const history = this.analysisHistory.get(result.familyId) || [];
+    history.unshift(historyEntry);
+
+    // 限制历史记录数量
+    if (history.length > this.MAX_HISTORY_COUNT) {
+      history.pop();
+    }
+
+    this.analysisHistory.set(result.familyId, history);
+  }
 
   // ----------------------------------------
   // 配置管理
@@ -334,7 +447,7 @@ class AIService {
   // 从存储加载配置
   async loadConfig(): Promise<AIUserConfig | null> {
     try {
-      const stored = await AsyncStorage.getItem(AI_CONFIG_KEY);
+      const stored = await storageService.getAIConfig();
       if (stored) {
         const config = JSON.parse(stored);
         this.userConfig = config;
@@ -343,7 +456,7 @@ class AIService {
       }
       return null;
     } catch (error) {
-      console.error('加载AI配置失败:', error);
+      logger.error(MODULE, '加载AI配置失败', error);
       return null;
     }
   }
@@ -351,9 +464,9 @@ class AIService {
   // 保存配置到存储
   async saveConfig(config: AIUserConfig): Promise<void> {
     try {
-      await AsyncStorage.setItem(AI_CONFIG_KEY, JSON.stringify(config));
+      await storageService.saveAIConfig(JSON.stringify(config));
     } catch (error) {
-      console.error('保存AI配置失败:', error);
+      logger.error(MODULE, '保存AI配置失败', error);
     }
   }
 
@@ -374,30 +487,59 @@ class AIService {
   // API调用
   // ----------------------------------------
 
-  // 通用API调用
-  async callAPI(messages: Array<{role: string; content: string}>, systemPrompt?: string): Promise<string> {
+  // 通用API调用（带指数退避重试）
+  async callAPI(
+    messages: Array<{role: string; content: string}>,
+    systemPrompt?: string,
+    options?: { retries?: number; baseDelay?: number }
+  ): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error('AI未配置，请先在设置中配置API Key');
     }
 
     const config = this.runtimeConfig!;
     const provider = config.provider;
+    const maxRetries = options?.retries ?? 3;
+    const baseDelay = options?.baseDelay ?? 1000;
 
-    // 根据不同提供商构建请求
-    switch (provider) {
-      case 'deepseek':
-      case 'moonshot':
-      case 'doubao':
-      case 'minimax':
-      case 'zhipu':
-      case 'wenxin':
-      case 'hunyuan':
-        return this.callOpenAICompatibleAPI(config, messages, systemPrompt);
-      case 'custom':
-        return this.callCustomAPI(config, messages, systemPrompt);
-      default:
-        throw new Error(`不支持的提供商: ${provider}`);
+    // 优化 #5: 指数退避重试机制
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        // 根据不同提供商构建请求
+        switch (provider) {
+          case 'deepseek':
+          case 'moonshot':
+          case 'doubao':
+          case 'minimax':
+          case 'zhipu':
+          case 'wenxin':
+          case 'hunyuan':
+            return await this.callOpenAICompatibleAPI(config, messages, systemPrompt);
+          case 'custom':
+            return await this.callCustomAPI(config, messages, systemPrompt);
+          default:
+            throw new Error(`不支持的提供商: ${provider}`);
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        // 如果还有重试次数，等待后重试
+        if (attempt < maxRetries) {
+          // 指数退避: 1s, 2s, 4s...
+          const delay = baseDelay * Math.pow(2, attempt);
+          // 添加随机抖动避免雷暴效应
+          const jitter = delay * 0.2 * Math.random();
+          logger.warn(MODULE, `API调用失败，第${attempt + 1}次重试，延迟${Math.round(delay + jitter)}ms`, lastError);
+
+          await new Promise(resolve => setTimeout(resolve, delay + jitter));
+        }
+      }
     }
+
+    // 所有重试都失败
+    throw lastError || new Error('API调用失败');
   }
 
   // OpenAI兼容格式API调用
@@ -469,13 +611,52 @@ class AIService {
   // ----------------------------------------
 
   // 生成保障检视AI总结
-  async generateSummary(_family: Family): Promise<string> {
+  async generateSummary(
+    family: Family,
+    options?: {
+      summaryStyle?: SummaryStyle;
+      maxLength?: number;
+      customRecommendedAmounts?: Record<string, number>;
+    }
+  ): Promise<string> {
+    const maxLength = options?.maxLength || 300;
+    const summaryStyle = options?.summaryStyle || 'professional';
+
     if (!this.isConfigured()) {
-      return 'AI智能总结即将上线，配置API Key后可自动生成专业的保障检视报告总结。';
+      // 降级：本地生成总结
+      const result = this.analyzeFamily(family);
+      return this.truncateToSentence(result.overallAdvice, maxLength);
     }
 
-    // TODO: 实现完整的总结生成逻辑
-    return 'AI智能总结即将上线，配置API Key后可自动生成专业的保障检视报告总结。';
+    // AI 增强总结
+    try {
+      const result = this.analyzeFamily(family);
+      const familyProfile = this.buildFamilyProfileFromData(
+        family,
+        options?.customRecommendedAmounts
+      );
+
+      // 优化 #3: 根据风格调整提示词
+      const systemPrompts = {
+        professional: '你是一位专业的保险规划顾问。请根据提供的家庭保障数据，生成一段保障检视总结，语气专业、客观、有人情味。',
+        simple: '请用通俗易懂的语言总结家庭保障情况，避免专业术语，让普通人也能理解。',
+        concise: '请简洁总结家庭保障的核心问题和建议，控制在50字以内。',
+      };
+
+      const systemPrompt = systemPrompts[summaryStyle];
+      const userMessage = `以下是家庭保障数据：\n${familyProfile}\n\n本地分析：${result.overallAdvice}\n\n请生成一段${summaryStyle === 'concise' ? '简洁' : summaryStyle === 'simple' ? '通俗易懂' : '专业'}的保障检视总结。`;
+
+      const aiSummary = await this.callAPI([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ]);
+
+      return aiSummary || result.overallAdvice;
+    } catch (error) {
+      logger.error(MODULE, 'AI总结生成失败，使用本地总结', error);
+      const result = this.analyzeFamily(family);
+      return result.overallAdvice;
+    }
   }
 
   // 测试API连接
@@ -499,52 +680,60 @@ class AIService {
   }
 
   // 清除配置
-  clearConfig(): void {
+  async clearConfig(): Promise<void> {
     this.userConfig = null;
     this.runtimeConfig = null;
-    AsyncStorage.removeItem(AI_CONFIG_KEY);
+    await storageService.clearAIConfig();
   }
 
   // ----------------------------------------
   // 家庭保障分析
   // ----------------------------------------
 
-  // 本地家庭保障分析（无需AI）
+  // 检查成员是否为家庭经济支柱角色
+  private isBreadwinner(role: string): boolean {
+    // 丈夫和妻子通常为经济支柱
+    return role === 'husband' || role === 'wife';
+  }
+
+  // 本地家庭保障分析（基于实际成员 coverage 数据）
   analyzeFamily(family: Family): FamilyAnalysisResult {
     const members = family.members || [];
-    const products = family.products || [];
 
-    // 使用 insuranceCalculator 计算评分
-    const calculatorMembers = members.map(m => ({
-      id: m.id,
-      name: m.name,
-      role: m.role,
-      age: m.age,
-      annualIncome: m.annualIncome,
-    }));
-
-    const familyScore = getFamilyProtectionScore(calculatorMembers, products);
-
-    // 分析每个成员
+    // 分析每个成员（基于实际的 coverage 数据）
     const memberResults: MemberAnalysisResult[] = members.map(member => {
-      const memberProducts = products.filter(p =>
-        p.insuredMembers?.includes(member.id) ||
-        p.insuredMembers?.includes('all')
-      );
+      const coverages = member.coverage || [];
+      const coverageGaps = this.calculateCoverageGapsFromData(member);
+      const warnings = this.generateWarningsFromData(member);
+      const suggestions = this.generateSuggestionsFromData(member);
 
-      const coverageScore = getCoverageScore(
-        { id: member.id, name: member.name, role: member.role, age: member.age },
-        memberProducts
-      );
+      // 判断是否为男性（男性不计入孕妇保障）
+      const isMale = ['father', 'husband', 'son', 'grandfather', 'other'].includes(member.role);
+      
+      // 保障覆盖率：根据性别动态计算有效保障项数量
+      // 男性 = 19 - 1 = 18项，女性 = 19项
+      const totalDefaultItems = isMale ? DEFAULT_COVERAGES.length - 1 : DEFAULT_COVERAGES.length;
+      const coveredItems = coverages.filter(c => c.hasCoverage && !(isMale && c.id === 'maternity')).length;
+      // 覆盖率 = 已覆盖项 / 有效保障项总数
+      // 规则：有任何一项保障就不显示0分，最低显示5分
+      let coverageScore = totalDefaultItems > 0
+        ? Math.round((coveredItems / totalDefaultItems) * 100)
+        : 0;
+      if (coveredItems > 0 && coverageScore < 5) {
+        coverageScore = 5;
+      }
 
-      // 计算保障缺口
-      const coverageGaps = this.calculateCoverageGaps(member, memberProducts);
-      const gaps = this.identifyGaps(member, memberProducts);
-      const suggestions = this.generateSuggestions(member, memberProducts);
-      const warnings = this.generateWarnings(member, memberProducts);
+      // 风险评分：100 - (高优先缺口*25 + 中等缺口*10)
+      // 规则：有任何一项保障就不显示0分，最低显示10分
+      const highPriorityCount = coverageGaps.filter(g => g.priority === 'high').length;
+      const mediumPriorityCount = coverageGaps.filter(g => g.priority === 'medium').length;
+      let riskScore = Math.max(0, 100 - highPriorityCount * 25 - mediumPriorityCount * 10);
+      if (coveredItems > 0 && riskScore < 10) {
+        riskScore = 10;
+      }
 
-      // 风险评分 = 100 - 缺口数量 * 15（简化计算）
-      const riskScore = Math.max(0, 100 - coverageGaps.length * 15);
+      // 保费合计
+      const totalPremium = coverages.reduce((sum, c) => sum + (c.premium || 0), 0);
 
       return {
         memberId: member.id,
@@ -553,13 +742,15 @@ class AIService {
         age: member.age || 0,
         riskScore,
         coverageScore,
-        products: memberProducts.map(p => ({
-          id: p.id,
-          name: p.name,
-          type: p.type,
-          coverage: p.coverage || 0,
-          premium: p.premium || 0,
-        })),
+        products: coverages
+          .filter(c => c.hasCoverage)
+          .map(c => ({
+            id: c.id,
+            name: this.getCoverageLabel(c.id),
+            type: this.getCoverageCategory(c.id),
+            coverage: c.coverageAmount || 0,
+            premium: c.premium || 0,
+          })),
         coverageGaps,
         suggestions,
         warnings,
@@ -570,11 +761,36 @@ class AIService {
     // 计算整体数据
     const totalGaps = memberResults.reduce((sum, m) => sum + m.coverageGaps.length, 0);
     const highPriorityGaps = memberResults.reduce(
-      (sum, m) => sum + m.coverageGaps.filter(g => g.priority === 'high').length,
-      0
+      (sum, m) => sum + m.coverageGaps.filter(g => g.priority === 'high').length, 0
     );
-    const overallRiskScore = familyScore.totalScore; // 使用保障评分作为风险评分
-    const overallAdvice = this.generateOverallAdvice(familyScore, totalGaps, highPriorityGaps);
+    const mediumPriorityGaps = memberResults.reduce(
+      (sum, m) => sum + m.coverageGaps.filter(g => g.priority === 'medium').length, 0
+    );
+    
+    // 家庭保障评分 = 各成员评分的加权平均（基于覆盖率）
+    const familyProtectionScore = members.length > 0
+      ? Math.round(memberResults.reduce((s, m) => s + m.coverageScore, 0) / members.length)
+      : 0;
+    const familyPremiumTotal = memberResults.reduce(
+      (sum, m) => sum + m.products.reduce((pSum, p) => pSum + p.premium, 0), 0
+    );
+    
+    // 整体风险评分：基于家庭保障覆盖率
+    // 计算方式：覆盖率得分 × (1 - 高优先缺口比例×0.3) × (1 - 中等缺口比例×0.1)
+    // 高优先缺口扣30%权重，中等缺口扣10%权重
+    const totalCoverageItems = memberResults.reduce((sum, m) => sum + m.coverageGaps.length + m.products.length, 0);
+    const highPriorityRatio = totalCoverageItems > 0 ? highPriorityGaps / Math.max(totalCoverageItems, 1) : 0;
+    const mediumPriorityRatio = totalCoverageItems > 0 ? mediumPriorityGaps / Math.max(totalCoverageItems, 1) : 0;
+    const overallRiskScore = Math.round(
+      Math.max(0, Math.min(100, 
+        familyProtectionScore * (1 - highPriorityRatio * 0.5) * (1 - mediumPriorityRatio * 0.2)
+      ))
+    );
+    const overallAdvice = this.generateOverallAdvice(
+      { totalScore: familyProtectionScore, totalPremium: familyPremiumTotal, coverageRate: members.length > 0 ? Math.round(memberResults.filter(m => m.coverageScore > 0).length / members.length * 100) : 0 },
+      totalGaps,
+      highPriorityGaps
+    );
 
     const result: FamilyAnalysisResult = {
       id: `analysis_${Date.now()}`,
@@ -583,8 +799,8 @@ class AIService {
       overallRiskScore,
       totalGaps,
       highPriorityGaps,
-      familyProtectionScore: familyScore.totalScore,
-      familyPremiumTotal: familyScore.totalPremium,
+      familyProtectionScore,
+      familyPremiumTotal,
       memberResults,
       overallAdvice,
     };
@@ -595,36 +811,86 @@ class AIService {
     return result;
   }
 
-  // 计算保障缺口详情
-  private calculateCoverageGaps(
-    member: FamilyMember,
-    products: InsuranceProduct[]
-  ): CoverageGap[] {
+  // 基于实际数据的保障缺口计算
+  // 修复：遍历所有默认保障项，对未添加的项也计为缺口
+  // 注意：孕妇保障只适用于成年女性，跳过男性和未成年女孩
+  private calculateCoverageGapsFromData(member: Member): CoverageGap[] {
     const gaps: CoverageGap[] = [];
-    const productTypes = new Set(products.map(p => p.type));
-    const totalCoverage = products.reduce((sum, p) => sum + (p.coverage || 0), 0);
+    const coverages = member.coverage || [];
+    const coverageMap = new Map(coverages.map(c => [c.id, c]));
 
-    // 检查各类型保障
-    const coverageChecks = [
-      { type: '重疾险', label: '重疾保障', recommended: 50, priority: member.role === '家庭支柱' ? 'high' : 'medium' as const },
-      { type: '医疗险', label: '医疗保障', recommended: 200, priority: 'high' as const },
-      { type: '意外险', label: '意外保障', recommended: 50, priority: 'medium' as const },
-      { type: '寿险', label: '寿险保障', recommended: 100, priority: member.role === '家庭支柱' ? 'high' : 'low' as const },
-    ];
+    // 男性角色列表
+    const maleRoles = ['husband', 'father', 'son', 'son_in_law', 'grandfather', 'father_in_law'];
+    const isMale = maleRoles.includes(member.role);
+    // 未成年女孩（女儿且年龄 < 18）
+    const isMinorGirl = member.role === 'daughter' && member.age < 18;
 
-    coverageChecks.forEach(check => {
-      const hasProduct = productTypes.has(check.type);
-      const currentCoverage = hasProduct
-        ? products.filter(p => p.type === check.type).reduce((sum, p) => sum + (p.coverage || 0), 0)
-        : 0;
+    // 遍历所有默认保障项
+    DEFAULT_COVERAGES.forEach(config => {
+      // 孕妇保障：跳过男性和未成年女孩
+      if (config.id === 'maternity' && (isMale || isMinorGirl)) {
+        return;
+      }
 
-      if (!hasProduct || currentCoverage < check.recommended) {
+      const memberCoverage = coverageMap.get(config.id);
+      const recommendedAmount = memberCoverage?.recommendedAmount ?? config.recommendedAmount ?? 0;
+
+      // 如果 recommendedAmount 为 0，不需要检查（如豁免类）
+      if (recommendedAmount <= 0) {
+        return;
+      }
+
+      // 经济支柱角色检查
+      const breadwinnerRoles = ['husband', 'wife'];
+      const isBreadwinner = breadwinnerRoles.includes(member.role);
+
+      // 如果成员没有添加这个保障项
+      if (!memberCoverage || !memberCoverage.hasCoverage) {
+        // 对于经济支柱，缺少寿险和重疾类保障是高优先级缺口
+        let priority: 'high' | 'medium' | 'low' = 'medium';
+        if (isBreadwinner && (config.category === 'life' || config.category === 'critical')) {
+          priority = 'high';
+        } else if (config.category === 'accident' || config.category === 'medical') {
+          // 意外和医疗类对所有人都比较重要
+          priority = 'medium';
+        } else {
+          priority = 'low';
+        }
+
         gaps.push({
-          label: check.label,
+          label: config.label,
+          currentCoverage: 0,
+          recommendedCoverage: recommendedAmount,
+          gap: recommendedAmount,
+          priority,
+        });
+        return;
+      }
+
+      // 如果成员有这个保障项但保额不足
+      const currentCoverage = memberCoverage.coverageAmount ?? 0;
+      if (currentCoverage < recommendedAmount) {
+        const gapAmount = Math.max(0, recommendedAmount - currentCoverage);
+        const coverageRatio = recommendedAmount > 0 ? currentCoverage / recommendedAmount : 0;
+
+        let priority: 'high' | 'medium' | 'low' = 'medium';
+        if (coverageRatio < 0.3) {
+          priority = 'high';
+        } else if (coverageRatio >= 0.7) {
+          priority = 'low';
+        }
+
+        // 对经济支柱的寿险和重疾类缺口提升优先级
+        if (isBreadwinner && (config.category === 'life' || config.category === 'critical')) {
+          if (priority === 'medium') priority = 'high';
+        }
+
+        gaps.push({
+          label: config.label,
           currentCoverage,
-          recommendedCoverage: check.recommended,
-          gap: Math.max(0, check.recommended - currentCoverage),
-          priority: hasProduct ? 'medium' : check.priority,
+          recommendedCoverage: recommendedAmount,
+          gap: gapAmount,
+          priority,
         });
       }
     });
@@ -632,40 +898,143 @@ class AIService {
     return gaps;
   }
 
+  // 获取保障项显示名称
+  private getCoverageLabel(coverageId: string): string {
+    const config = DEFAULT_COVERAGES.find(c => c.id === coverageId);
+    return config?.label || coverageId;
+  }
+
+  // 获取保障项分类
+  private getCoverageCategory(coverageId: string): string {
+    const config = DEFAULT_COVERAGES.find(c => c.id === coverageId);
+    return config?.category || '其他';
+  }
+
   // 生成成员总结
   private generateMemberSummary(
-    member: FamilyMember,
+    member: Member,
     coverageScore: number,
     gaps: CoverageGap[]
   ): string {
+    const roleLabel = MEMBER_ROLE_LABELS[member.role] || member.role;
+    const isMale = ['father', 'husband', 'son', 'grandfather', 'other'].includes(member.role);
+    const sufficientCount = (member.coverage || []).filter(c => c.hasCoverage && !(isMale && c.id === 'maternity')).length;
+    const totalDefaultCount = isMale ? DEFAULT_COVERAGES.length - 1 : DEFAULT_COVERAGES.length;
+
     if (gaps.length === 0) {
-      return `${member.name}的保障配置较为完善，建议定期检视保额是否足够。`;
+      return `${member.name}(${roleLabel})的保障配置较为完善，建议定期检视保额是否足够。`;
     }
     if (gaps.filter(g => g.priority === 'high').length > 0) {
-      return `${member.name}存在高优先级保障缺口，建议尽快补充。`;
+      return `${member.name}(${roleLabel})存在${gaps.filter(g => g.priority === 'high').length}项高优先级保障缺口，建议尽快补充。`;
     }
-    return `${member.name}保障基本覆盖，建议关注保障缺口并适时补充。`;
+    return `${member.name}(${roleLabel})已有${sufficientCount}/${totalDefaultCount}项保障，保障覆盖率${coverageScore}%，建议关注${gaps.length}项保障缺口并适时补充。`;
   }
 
-  // 生成成员警告
-  private generateWarnings(
-    member: FamilyMember,
-    products: InsuranceProduct[]
-  ): string[] {
+  // 生成成员警告（基于实际数据）
+  private generateWarningsFromData(member: Member): string[] {
     const warnings: string[] = [];
-    const productTypes = new Set(products.map(p => p.type));
+    const coverages = member.coverage || [];
 
-    if (!productTypes.has('医疗险') && (member.age || 0) > 50) {
+    if (coverages.length === 0) {
+      warnings.push('当前无任何保障配置，存在较大风险');
+      return warnings;
+    }
+
+    const hasMedicalCoverage = coverages.some(c =>
+      c.hasCoverage && (c.id === 'medical' || c.id === 'millionMedical' || c.id === 'overseasMedical')
+    );
+    if (!hasMedicalCoverage && (member.age || 0) > 50) {
       warnings.push('年龄较大，建议优先配置医疗险');
     }
-    if (!productTypes.has('意外险')) {
-      warnings.push('缺少意外保障，意外风险较高');
+
+    const hasMedical = coverages.some(c =>
+      c.hasCoverage && (c.id === 'socialInsurance' || c.id === 'medical' || c.id === 'millionMedical')
+    );
+    if (!hasMedical) {
+      warnings.push('缺少医疗保障，建议配置社保或商业医疗险');
     }
-    if (products.length === 0) {
-      warnings.push('当前无任何保障配置，存在较大风险');
+
+    const hasAccident = coverages.some(c =>
+      c.hasCoverage && (c.id === 'accident' || c.id === 'disability')
+    );
+    if (!hasAccident) {
+      warnings.push('缺少意外伤害保障，建议配置意外险');
+    }
+
+    const breadwinnerRoles = ['husband', 'wife'];
+    if (breadwinnerRoles.includes(member.role)) {
+      const hasLifeCoverage = coverages.some(c =>
+        c.hasCoverage && c.id === 'death'
+      );
+      if (!hasLifeCoverage) {
+        warnings.push('作为家庭经济支柱，缺少寿险保障会带来较大风险');
+      }
+    }
+
+    const childRoles = ['son', 'daughter'];
+    if (childRoles.includes(member.role) && (member.age || 0) < 18) {
+      const hasEducationCoverage = coverages.some(c =>
+        c.hasCoverage && c.id === 'education'
+      );
+      if (!hasEducationCoverage) {
+        warnings.push('缺少教育年金规划，建议提前准备');
+      }
     }
 
     return warnings;
+  }
+
+  // 生成成员建议（基于实际数据）
+  private generateSuggestionsFromData(member: Member): string[] {
+    const suggestions: string[] = [];
+    const coverages = member.coverage || [];
+
+    const breadwinnerRoles = ['husband', 'wife'];
+    if (breadwinnerRoles.includes(member.role)) {
+      const hasLifeCoverage = coverages.some(c => c.hasCoverage && c.id === 'death');
+      const hasCriticalCoverage = coverages.some(c => c.hasCoverage && c.id === 'criticalIllness');
+      if (!hasLifeCoverage) {
+        suggestions.push('建议配置定期寿险，保障家庭责任期');
+      }
+      if (!hasCriticalCoverage) {
+        suggestions.push('重疾险保额建议覆盖3-5年年收入');
+      }
+    }
+
+    if ((member.age || 0) > 50) {
+      const hasMedicalCoverage = coverages.some(c => c.hasCoverage && ['medical', 'millionMedical'].includes(c.id));
+      if (!hasMedicalCoverage) {
+        suggestions.push('建议关注医疗险和防癌险');
+      }
+      suggestions.push('注意健康告知，如实填写');
+    }
+
+    const childRoles = ['son', 'daughter'];
+    if (childRoles.includes(member.role) && (member.age || 0) < 18) {
+      const hasAccident = coverages.some(c => c.hasCoverage && c.id === 'accident');
+      const hasSocialInsurance = coverages.some(c => c.hasCoverage && c.id === 'socialInsurance');
+      const hasMedical = coverages.some(c => c.hasCoverage && (c.id === 'medical' || c.id === 'millionMedical'));
+      const hasEducation = coverages.some(c => c.hasCoverage && c.id === 'education');
+      if (!hasSocialInsurance || !hasMedical) {
+        suggestions.push('优先配置医疗保障');
+      }
+      if (!hasAccident) {
+        suggestions.push('建议配置意外险');
+      }
+      if (!hasEducation) {
+        suggestions.push('教育年金可在基础保障完善后考虑');
+      }
+    }
+
+    // 如果没有特别建议，给出通用建议
+    if (suggestions.length === 0 && coverages.length > 0) {
+      const uncoveredCount = coverages.filter(c => !c.hasCoverage).length;
+      if (uncoveredCount > 0) {
+        suggestions.push(`还有${uncoveredCount}项保障未覆盖，建议逐步完善`);
+      }
+    }
+
+    return suggestions;
   }
 
   // 生成整体建议
@@ -686,26 +1055,56 @@ class AIService {
     }
 
     if (familyScore.totalPremium > 0) {
-      advice += ` 当前年保费${familyScore.totalPremium}元，保费支出合理。`;
+      advice += ` 当前年保费${familyScore.totalPremium}万元。`;
+    }
+
+    if (familyScore.totalScore >= 70) {
+      advice += ' 家庭保障整体良好，可重点关注个别缺口。';
+    } else if (familyScore.totalScore >= 40) {
+      advice += ' 家庭保障中等，建议优先补充高优先级缺口。';
+    } else {
+      advice += ' 家庭保障偏低，建议尽快完善基础保障。';
     }
 
     return advice;
   }
 
   // AI增强分析
-  async analyzeWithAI(family: Family): Promise<FamilyAnalysisResult> {
+  async analyzeWithAI(
+    family: Family,
+    options?: {
+      summaryStyle?: SummaryStyle;
+      customRecommendedAmounts?: Record<string, number>;
+    }
+  ): Promise<FamilyAnalysisResult> {
     if (!this.isConfigured()) {
       throw new Error('请先在设置中配置AI服务');
     }
 
-    // 先做本地分析
+    // 优化 #1: 检查缓存
+    const cacheKey = this.computeFamilyHash(family);
+    const cachedEntry = this.analysisCache.get(cacheKey);
+    if (cachedEntry && (Date.now() - cachedEntry.timestamp) < this.CACHE_TTL) {
+      logger.info(MODULE, '使用缓存的分析结果');
+      return cachedEntry.result;
+    }
+
+    // 先做本地分析（基于实际数据）
     const localResult = this.analyzeFamily(family);
+    const summaryStyle = options?.summaryStyle || 'professional';
+    const customAmounts = options?.customRecommendedAmounts;
 
-    // 构建提示词
-    const systemPrompt = `你是一位专业的家庭保险规划师，擅长分析家庭保障缺口并给出专业建议。
-请基于提供的信息进行分析，语气专业但亲切，给出的建议要实际可行。`;
+    // 优化 #3: 根据风格调整提示词
+    const systemPromptStyles = {
+      professional: '你是一位专业的家庭保险规划师，擅长分析家庭保障缺口并给出专业建议。请基于提供的信息进行分析，语气专业但亲切，给出的建议要实际可行。',
+      simple: '你是一位耐心的保险顾问。请用通俗易懂的语言分析家庭保障情况，避免过多专业术语，让客户容易理解。',
+      concise: '请简洁分析家庭保障情况，直接给出核心问题和关键建议，控制字数。',
+    };
 
-    const familyProfile = this.buildFamilyProfile(family);
+    const systemPrompt = systemPromptStyles[summaryStyle];
+
+    // 优化 #8: 将自定义保额引入上下文
+    const familyProfile = this.buildFamilyProfileFromData(family, customAmounts);
 
     const userMessage = `请分析以下家庭的保险保障情况：
 
@@ -713,11 +1112,15 @@ ${familyProfile}
 
 本地分析结果：
 - 家庭保障评分：${localResult.familyProtectionScore}分
-- 家庭年保费：${localResult.familyPremiumTotal}元
+- 年保费：${localResult.familyPremiumTotal}万元
+- 总缺口数：${localResult.totalGaps}项
+- 高优先级缺口：${localResult.highPriorityGaps}项
+
+${customAmounts ? '注意：客户有自定义的保障保额配置，参考上述家庭档案中的建议保额。' : ''}
 
 请从以下维度进行AI增强分析：
 1. 家庭整体风险评估
-2. 各成员保障缺口
+2. 各成员保障缺口分析
 3. 优先配置建议
 4. 保险配置顺序建议`;
 
@@ -728,135 +1131,87 @@ ${familyProfile}
       ]);
 
       // 解析AI响应并合并到结果中
-      return {
+      const result: FamilyAnalysisResult = {
         ...localResult,
         id: `ai_analysis_${Date.now()}`,
         aiSummary: response,
         overallAdvice: localResult.overallAdvice + '\n\n🤖 AI增强建议：\n' + response,
       };
+
+      // 优化 #1: 保存到缓存
+      this.analysisCache.set(cacheKey, {
+        result,
+        timestamp: Date.now(),
+      });
+
+      // 优化 #6: 保存到历史记录
+      this.saveAnalysisHistory(result);
+
+      return result;
     } catch (error) {
-      console.error('AI分析失败:', error);
+      logger.error(MODULE, 'AI分析失败', error);
       throw error;
     }
   }
 
-  // 构建家庭档案
-  private buildFamilyProfile(family: Family): string {
+  // 优化 #6: 获取分析历史
+  getAnalysisHistory(familyId: string): AnalysisHistory[] {
+    return this.analysisHistory.get(familyId) || [];
+  }
+
+  // 优化 #6: 清除分析历史
+  clearAnalysisHistory(familyId?: string): void {
+    if (familyId) {
+      this.analysisHistory.delete(familyId);
+    } else {
+      this.analysisHistory.clear();
+    }
+  }
+
+  // 构建家庭档案（基于实际数据）
+  private buildFamilyProfileFromData(
+    family: Family,
+    customRecommendedAmounts?: Record<string, number>
+  ): string {
     const members = family.members || [];
-    const products = family.products || [];
 
     let profile = '## 家庭成员信息\n';
     members.forEach(m => {
-      profile += `- ${m.name}（${m.role}）：${m.age || '未知'}岁`;
-      if (m.annualIncome) {
-        profile += `，年收入${m.annualIncome}元`;
-      }
-      profile += '\n';
+      const roleLabel = MEMBER_ROLE_LABELS[m.role] || m.role;
+      profile += `- ${m.name}（${roleLabel}）：${m.age || '未知'}岁\n`;
     });
 
-    profile += '\n## 已配置保险\n';
-    if (products.length === 0) {
-      profile += '暂无保险配置\n';
-    } else {
-      products.forEach(p => {
-        const insuredNames = p.insuredMembers?.map(id => {
-          const member = members.find(m => m.id === id);
-          return member?.name || id;
-        }).join('、') || '全体成员';
-
-        profile += `- ${p.name}（${p.type}）：保额${p.coverage || 0}万，年费${p.premium || 0}元，承保人：${insuredNames}\n`;
+    // 优化 #8: 如果有自定义保额，添加到配置说明
+    if (customRecommendedAmounts && Object.keys(customRecommendedAmounts).length > 0) {
+      profile += '\n## 客户自定义保障配置\n';
+      Object.entries(customRecommendedAmounts).forEach(([type, amount]) => {
+        if (amount !== undefined) {
+          const config = DEFAULT_COVERAGES.find(c => c.id === type);
+          const label = config?.label || type;
+          profile += `- ${label}：建议保额 ${amount}万\n`;
+        }
       });
     }
 
+    profile += '\n## 已有保障配置\n';
+    let hasAnyCoverage = false;
+    members.forEach(m => {
+      const coveredItems = (m.coverage || []).filter(c => c.hasCoverage);
+      if (coveredItems.length > 0) {
+        hasAnyCoverage = true;
+        profile += `\n### ${m.name}\n`;
+        coveredItems.forEach(c => {
+          const config = DEFAULT_COVERAGES.find(dc => dc.id === c.id);
+          profile += `- ${config?.label || c.id}：保额${c.coverageAmount || 0}万，年缴${c.premium || 0}万元\n`;
+        });
+      }
+    });
+
+    if (!hasAnyCoverage) {
+      profile += '暂无保障配置\n';
+    }
+
     return profile;
-  }
-
-  // 识别保障缺口
-  private identifyGaps(member: FamilyMember, products: InsuranceProduct[]): string[] {
-    const gaps: string[] = [];
-
-    // 检查基础保障
-    const hasHealth = products.some(p =>
-      p.type === '重疾险' || p.type === '医疗险'
-    );
-    if (!hasHealth) {
-      gaps.push(`${member.name}缺少健康类保障（重疾险/医疗险）`);
-    }
-
-    // 检查意外保障
-    const hasAccident = products.some(p => p.type === '意外险');
-    if (!hasAccident) {
-      gaps.push(`${member.name}缺少意外保障`);
-    }
-
-    // 检查寿险
-    if (member.role === '家庭支柱' && !products.some(p => p.type === '寿险')) {
-      gaps.push(`${member.name}作为家庭支柱，建议配置寿险`);
-    }
-
-    // 检查教育金/养老金
-    if (member.role === '子女' && !products.some(p => p.type === '教育金')) {
-      gaps.push(`${member.name}缺少教育金规划`);
-    }
-
-    if (member.role === '父母' && !products.some(p => p.type === '养老金')) {
-      gaps.push(`${member.name}缺少养老规划`);
-    }
-
-    return gaps;
-  }
-
-  // 生成建议
-  private generateSuggestions(member: FamilyMember, products: InsuranceProduct[]): string[] {
-    const suggestions: string[] = [];
-
-    if (member.role === '家庭支柱') {
-      suggestions.push('建议配置定期寿险，保障家庭责任期');
-      suggestions.push('重疾险保额建议覆盖3-5年年收入');
-    }
-
-    if ((member.age || 0) > 50) {
-      suggestions.push('建议关注医疗险和防癌险');
-      suggestions.push('注意健康告知，如实填写');
-    }
-
-    if ((member.age || 0) < 18 && member.role === '子女') {
-      suggestions.push('优先配置医疗险和意外险');
-      suggestions.push('教育金可在基础保障完善后考虑');
-    }
-
-    return suggestions;
-  }
-
-  // 生成整体建议
-  private generateOverallSuggestions(
-    members: FamilyMember[],
-    memberAnalyses: MemberAnalysisResult[]
-  ): string[] {
-    const suggestions: string[] = [];
-
-    // 整体性建议
-    const allGaps = memberAnalyses.flatMap(m => m.gaps);
-    if (allGaps.length > 5) {
-      suggestions.push('家庭整体保障缺口较大，建议分阶段补充');
-    }
-
-    // 保费支出建议
-    const totalPremium = memberAnalyses.reduce(
-      (sum, m) => sum + m.products.reduce((pSum, p) => pSum + p.premium, 0),
-      0
-    );
-    if (totalPremium > 0) {
-      suggestions.push(`当前家庭年保费支出约${totalPremium}元，建议控制在家庭年收入10%-20%`);
-    }
-
-    // 保障顺序建议
-    const hasMainBreadwinner = members.some(m => m.role === '家庭支柱');
-    if (!hasMainBreadwinner) {
-      suggestions.push('建议优先为家庭经济支柱配置保障');
-    }
-
-    return suggestions;
   }
 
   // ----------------------------------------
@@ -962,7 +1317,7 @@ ${familyProfile}
 
       return response;
     } catch (error) {
-      console.error('话术生成失败:', error);
+      logger.error(MODULE, '话术生成失败', error);
       throw error;
     }
   }
@@ -971,23 +1326,23 @@ ${familyProfile}
   // 历史记录管理
   // ----------------------------------------
 
-  async saveAnalysisHistory(analysis: any): Promise<void> {
+  async saveAnalysisHistory(analysis: FamilyAnalysisResult): Promise<void> {
     try {
       const history = await this.getAnalysisHistory();
       history.unshift(analysis);
       const trimmed = history.slice(0, 10);
-      await AsyncStorage.setItem(ANALYSIS_HISTORY_KEY, JSON.stringify(trimmed));
+      await storageService.saveAnalysisHistory(JSON.stringify(trimmed));
     } catch (error) {
-      console.error('保存分析历史失败:', error);
+      logger.error(MODULE, '保存分析历史失败', error);
     }
   }
 
-  async getAnalysisHistory(): Promise<any[]> {
+  async getAnalysisHistory(): Promise<FamilyAnalysisResult[]> {
     try {
-      const stored = await AsyncStorage.getItem(ANALYSIS_HISTORY_KEY);
+      const stored = await storageService.getAnalysisHistory();
       return stored ? JSON.parse(stored) : [];
     } catch (error) {
-      console.error('获取分析历史失败:', error);
+      logger.error(MODULE, '获取分析历史失败', error);
       return [];
     }
   }
@@ -996,25 +1351,31 @@ ${familyProfile}
     id: string;
     objection: string;
     response: string;
-    context: Record<string, any>;
+    context: Record<string, unknown>;
     createdAt: string;
   }): Promise<void> {
     try {
       const history = await this.getSpeechHistory();
       history.unshift(speech);
       const trimmed = history.slice(0, 20);
-      await AsyncStorage.setItem(SPEECH_HISTORY_KEY, JSON.stringify(trimmed));
+      await storageService.saveSpeechHistory(JSON.stringify(trimmed));
     } catch (error) {
-      console.error('保存话术历史失败:', error);
+      logger.error(MODULE, '保存话术历史失败', error);
     }
   }
 
-  async getSpeechHistory(): Promise<any[]> {
+  async getSpeechHistory(): Promise<Array<{
+    id: string;
+    objection: string;
+    response: string;
+    context: Record<string, unknown>;
+    createdAt: string;
+  }>> {
     try {
-      const stored = await AsyncStorage.getItem(SPEECH_HISTORY_KEY);
+      const stored = await storageService.getSpeechHistory();
       return stored ? JSON.parse(stored) : [];
     } catch (error) {
-      console.error('获取话术历史失败:', error);
+      logger.error(MODULE, '获取话术历史失败', error);
       return [];
     }
   }

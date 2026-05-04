@@ -228,20 +228,33 @@ const FamilyTreeGraph: React.FC<FamilyTreeGraphProps> = ({family, onMemberPress}
   const totalStats = useMemo(() => {
     let ownedCoverage = 0;
     let ownedRights = 0;
-    const memberCount = family.members.length;
+    let totalCoverage = 0;
+    const rightsCount = 8; // 权益项数量
+    
+    // 男性角色列表（不计入孕妇保障）
+    const maleRoles = ['father', 'husband', 'son', 'grandfather', 'other'];
 
     family.members.forEach(member => {
-      ownedCoverage += member.coverage.filter(c => c.hasCoverage).length;
+      const isMale = maleRoles.includes(member.role);
+      // 根据性别计算有效保障项数量（男性不含孕妇保障）
+      const effectiveCoverageCount = isMale ? 18 : 19;
+      totalCoverage += effectiveCoverageCount;
+      
+      // 统计已有保障（剔除男性的孕妇保障）
+      ownedCoverage += member.coverage.filter(c => {
+        if (!c.hasCoverage) return false;
+        // 男性不计入孕妇保障
+        return !(isMale && c.id === 'maternity');
+      }).length;
+      
       ownedRights += member.rights?.filter(r => r.hasRight).length ?? 0;
     });
 
-    // 使用固定的总数（19项保障 + 8项权益）
-    const totalCoverage = memberCount * 18;
-    const totalRights = memberCount * 8;
-
     return {
       coverageRate: totalCoverage > 0 ? Math.round((ownedCoverage / totalCoverage) * 100) : 0,
-      rightsRate: totalRights > 0 ? Math.round((ownedRights / totalRights) * 100) : 0,
+      rightsRate: family.members.length * rightsCount > 0 
+        ? Math.round((ownedRights / (family.members.length * rightsCount)) * 100) 
+        : 0,
     };
   }, [family]);
 
@@ -402,9 +415,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   familyName: {
-    ...typography.heading[2],
+    ...typography.heading,
     color: colors.text[0],
-    fontWeight: '700',
   },
   familyStructure: {
     ...typography.caption,
@@ -422,8 +434,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statValue: {
-    ...typography.heading[1],
-    fontWeight: '700',
+    ...typography.heading,
     color: colors.primary[1],
   },
   statLabel: {
@@ -500,7 +511,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card.border,
   },
   connectorBranch: {
-    width: 2,
     height: 0,
     borderTopWidth: 2,
     borderTopColor: colors.card.border,

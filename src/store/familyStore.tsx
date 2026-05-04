@@ -1,8 +1,9 @@
 // src/store/familyStore.tsx
 import React, {createContext, useContext, useReducer, useEffect, useCallback} from 'react';
-import type {Family, Member, Coverage, Right, ExportSettings} from '../types';
+import type {Family, Member, Coverage, Right, ExportSettings, FamilyStructureType} from '../types';
 import {storageService} from './storageService';
 import {generateUUID} from '../utils/formatUtils';
+import {logger} from '../utils/logger';
 
 // ========== State & Actions ==========
 interface FamilyState {
@@ -117,7 +118,7 @@ const defaultExportSettings: ExportSettings = {
 function createInitialFamily(
   id: string,
   name: string,
-  structureType: string,
+  structureType: FamilyStructureType,
   structureLabel: string,
   members: Member[],
   agentInfo?: {name: string; phone: string},
@@ -143,7 +144,7 @@ function createInitialFamily(
 interface FamilyContextType {
   state: FamilyState;
   reloadFamilies: () => Promise<void>;
-  addFamily: (name: string, structureType: string, structureLabel: string, members: Member[], agentInfo?: {name: string; phone: string}) => Promise<string>;
+  addFamily: (name: string, structureType: FamilyStructureType, structureLabel: string, members: Member[], agentInfo?: {name: string; phone: string}) => Promise<string>;
   updateFamily: (family: Family) => Promise<void>;
   deleteFamily: (id: string) => Promise<void>;
   addMember: (familyId: string, member: Member) => Promise<void>;
@@ -161,18 +162,19 @@ export const FamilyProvider: React.FC<{children: React.ReactNode}> = ({children}
     loading: true,
   });
 
-  // 初始加载（定义在使用之前，避免 TDZ）
+  // 初始加载
   const reloadFamilies = useCallback(async () => {
     dispatch({type: 'SET_LOADING', payload: true});
-    const data = await storageService.getFamilies();
-    if (data) {
-      try {
+    try {
+      const data = await storageService.getFamilies();
+      if (data) {
         const families: Family[] = JSON.parse(data);
         dispatch({type: 'LOAD_FAMILIES', payload: families});
-      } catch {
+      } else {
         dispatch({type: 'LOAD_FAMILIES', payload: []});
       }
-    } else {
+    } catch (error) {
+      logger.error('FamilyStore', '加载家庭数据失败', error);
       dispatch({type: 'LOAD_FAMILIES', payload: []});
     }
   }, []);
@@ -181,18 +183,20 @@ export const FamilyProvider: React.FC<{children: React.ReactNode}> = ({children}
     reloadFamilies();
   }, [reloadFamilies]);
 
-  // 自动持久化
+  // 自动持久化（300ms debounce，避免频繁写入 AsyncStorage）
   useEffect(() => {
     if (!state.loading) {
       const timer = setTimeout(() => {
-        storageService.saveFamilies(JSON.stringify(state.families));
+        storageService.saveFamilies(JSON.stringify(state.families)).catch(
+          err => logger.error('FamilyStore', '持久化家庭数据失败', err),
+        );
       }, 300);
       return () => clearTimeout(timer);
     }
   }, [state.families, state.loading]);
 
   const addFamily = useCallback(
-    async (name: string, structureType: string, structureLabel: string, members: Member[], agentInfo?: {name: string; phone: string}) => {
+    async (name: string, structureType: FamilyStructureType, structureLabel: string, members: Member[], agentInfo?: {name: string; phone: string}) => {
       const id = generateUUID();
       const family = createInitialFamily(id, name, structureType, structureLabel, members, agentInfo);
       dispatch({type: 'ADD_FAMILY', payload: family});

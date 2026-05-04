@@ -38,10 +38,14 @@ const MemberDetailScreen: React.FC<Props> = ({route, navigation}) => {
 
   const [localMember, setLocalMember] = useState<Member | null>(null);
 
-  // 同步本地state
+  // 同步本地state（深拷贝避免污染原始数据）
   React.useEffect(() => {
     if (member) {
-      setLocalMember({...member});
+      setLocalMember({
+        ...member,
+        coverage: member.coverage.map(c => ({...c})),
+        rights: member.rights.map(r => ({...r})),
+      });
     }
   }, [member]);
 
@@ -75,9 +79,9 @@ const MemberDetailScreen: React.FC<Props> = ({route, navigation}) => {
 
   const saveAge = useCallback(() => {
     const newAge = parseInt(ageInput, 10);
-    if (!isNaN(newAge) && newAge >= 0 && newAge <= 120) {
+    if (!isNaN(newAge) && newAge >= 0 && newAge <= 120 && localMember) {
       // 直接使用 newAge 值，避免闭包陷阱
-      const updatedMember = {...localMember, age: newAge};
+      const updatedMember: Member = {...localMember, age: newAge};
       setLocalMember(updatedMember);
       updateMember(familyId, updatedMember);
     }
@@ -94,79 +98,105 @@ const MemberDetailScreen: React.FC<Props> = ({route, navigation}) => {
 
   const saveName = useCallback(() => {
     const trimmedName = nameInput.trim();
-    if (trimmedName) {
+    if (trimmedName && localMember) {
       // 直接使用新名称，避免闭包陷阱
-      const updatedMember = {...localMember, name: trimmedName};
+      const updatedMember: Member = {...localMember, name: trimmedName};
       setLocalMember(updatedMember);
       updateMember(familyId, updatedMember);
     }
     setEditingName(false);
   }, [nameInput, localMember, familyId, updateMember]);
 
-  const toggleCoverage = useCallback((index: number) => {
+  const toggleCoverage = useCallback((id: string) => {
     setLocalMember(prev => {
       if (!prev) return prev;
-      const newCoverage = [...prev.coverage];
-      const item = {...newCoverage[index]};
+      const newCoverage = prev.coverage.map(c => ({...c}));
+      const idx = newCoverage.findIndex(c => c.id === id);
+      if (idx === -1) return prev;
+      const item = newCoverage[idx];
       item.hasCoverage = !item.hasCoverage;
       if (!item.hasCoverage) {
         item.coverageAmount = 0;
+        item.premium = undefined;
         item.gapAmount = item.gapAmount ?? 0;
       } else {
         item.gapAmount = 0;
       }
-      newCoverage[index] = item;
+      newCoverage[idx] = item;
       return {...prev, coverage: newCoverage};
     });
   }, []);
 
   const updateCoverageField = useCallback(
-    (index: number, field: 'coverageAmount' | 'gapAmount' | 'policyDetails' | 'recommendedAmount', value: string | number) => {
+    (id: string, field: 'coverageAmount' | 'gapAmount' | 'policyDetails' | 'recommendedAmount' | 'premium', value: string | number) => {
       setLocalMember(prev => {
         if (!prev) return prev;
-        const newCoverage = [...prev.coverage];
-        const item = {...newCoverage[index]};
+        const newCoverage = prev.coverage.map(c => ({...c}));
+        const idx = newCoverage.findIndex(c => c.id === id);
+        if (idx === -1) return prev;
+        const item = newCoverage[idx];
         const numericValue = typeof value === 'string' ? Number(value) || 0 : value;
-        
-        if (field === 'recommendedAmount') {
-          // 更新建议保额时，同时更新缺口
-          (item as any)[field] = numericValue;
-          item.gapAmount = numericValue - (item.coverageAmount ?? 0);
-        } else if (field === 'coverageAmount') {
-          (item as any)[field] = numericValue;
-          item.gapAmount = (item.recommendedAmount ?? 0) - numericValue;
-        } else {
-          (item as any)[field] = typeof value === 'string' && field === 'policyDetails' ? value : numericValue;
+
+        // 类型安全地设置字段
+        switch (field) {
+          case 'recommendedAmount':
+            item.recommendedAmount = numericValue;
+            item.gapAmount = Math.max(0, numericValue - (item.coverageAmount ?? 0));
+            break;
+          case 'coverageAmount':
+            item.coverageAmount = numericValue;
+            item.gapAmount = Math.max(0, (item.recommendedAmount ?? 0) - numericValue);
+            break;
+          case 'gapAmount':
+            item.gapAmount = numericValue;
+            break;
+          case 'premium':
+            item.premium = numericValue;
+            break;
+          case 'policyDetails':
+            item.policyDetails = typeof value === 'string' ? value : String(value);
+            break;
         }
-        
-        newCoverage[index] = item;
+
+        newCoverage[idx] = item;
         return {...prev, coverage: newCoverage};
       });
     },
     [],
   );
 
-  const toggleRight = useCallback((index: number) => {
+  const toggleRight = useCallback((id: string) => {
     setLocalMember(prev => {
       if (!prev) return prev;
-      const newRights = [...prev.rights];
-      const item = {...newRights[index]};
+      const newRights = prev.rights.map(r => ({...r}));
+      const idx = newRights.findIndex(r => r.id === id);
+      if (idx === -1) return prev;
+      const item = newRights[idx];
       item.hasRight = !item.hasRight;
       if (!item.hasRight) {
         item.validityDate = '';
         item.notes = '';
       }
-      newRights[index] = item;
+      newRights[idx] = item;
       return {...prev, rights: newRights};
     });
   }, []);
 
   const updateRightField = useCallback(
-    (index: number, field: 'validityDate' | 'notes', value: string) => {
+    (id: string, field: 'validityDate' | 'notes', value: string) => {
       setLocalMember(prev => {
         if (!prev) return prev;
-        const newRights = [...prev.rights];
-        (newRights[index] as any)[field] = value;
+        const newRights = prev.rights.map(r => ({...r}));
+        const idx = newRights.findIndex(r => r.id === id);
+        if (idx === -1) return prev;
+        const item = newRights[idx];
+        // 类型安全地设置字段
+        if (field === 'validityDate') {
+          item.validityDate = value;
+        } else {
+          item.notes = value;
+        }
+        newRights[idx] = item;
         return {...prev, rights: newRights};
       });
     },

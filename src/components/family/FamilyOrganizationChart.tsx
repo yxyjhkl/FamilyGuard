@@ -16,9 +16,8 @@ import {colors, spacing, borderRadius} from '../../theme';
 import type {Family, Member} from '../../types';
 import {MEMBER_ROLE_LABELS} from '../../types';
 import RoleAvatar from '../common/RoleAvatar';
-import {insuranceRights} from '../../data/insuranceRights';
-import {INSURANCE_COVERAGES} from '../../constants/insurance';
 import {useFamily} from '../../hooks/useFamily';
+import {useSettings} from '../../store/settingsStore';
 
 // 状态枚举
 type MemberStatus = 'none' | 'owned' | 'claimed';
@@ -46,6 +45,7 @@ interface CircleNodeProps {
   color: string;
   size?: number;
   onPress?: () => void;
+  onLongPress?: () => void;
   showAmount?: number;
   showDate?: string;
 }
@@ -56,15 +56,23 @@ const CircleNode: React.FC<CircleNodeProps> = ({
   color,
   size = 28,
   onPress,
+  onLongPress,
   showAmount,
   showDate,
 }) => {
+  // 检查颜色是否为红色系（避免与已理赔状态混淆）
+  const isRedColor = (c: string) => {
+    if (c === '#E74C3C' || c === '#FF3B30' || c === '#C0392B') return true;
+    return false;
+  };
+
   const getBackgroundColor = () => {
     switch (status) {
       case 'owned':
         return color;
       case 'claimed':
-        return colors.functional.danger;
+        // 如果保障项目本身就是红色，已理赔用深棕色区分
+        return isRedColor(color) ? '#5D4037' : colors.functional.danger;
       case 'none':
       default:
         return '#E5E7EB';
@@ -90,8 +98,9 @@ const CircleNode: React.FC<CircleNodeProps> = ({
         },
       ]}
       onPress={onPress}
+      onLongPress={onLongPress}
       activeOpacity={0.7}
-      disabled={!onPress}>
+      disabled={!onPress && !onLongPress}>
       <Text
         style={[
           styles.circleNodeText,
@@ -121,13 +130,21 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
   onStatusChange,
   onDetailSave,
 }) => {
+  const {getActiveCoverages, getActiveRights} = useSettings();
   const [selectedNode, setSelectedNode] = useState<{
     type: string;
     category: 'right' | 'coverage';
     currentStatus: MemberStatus;
   } | null>(null);
   const [inputValue, setInputValue] = useState('');
-  const [inputMode, setInputMode] = useState<'amount' | 'date'>('amount');
+  const [inputMode, setInputMode] = useState<'amount' | 'date' | 'status'>('amount');
+  // 状态选择弹窗
+  const [showStatusPicker, setShowStatusPicker] = useState(false);
+  const [statusPickerTarget, setStatusPickerTarget] = useState<{
+    type: string;
+    category: 'right' | 'coverage';
+    currentStatus: MemberStatus;
+  } | null>(null);
 
   const getMemberAvatarColor = () => {
     const role = MEMBER_ROLE_LABELS[member.role];
@@ -139,12 +156,12 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
 
   // 处理节点点击
   const handleNodePress = useCallback(
-    (type: string, category: 'right' | 'coverage', currentStatus: MemberStatus) => {
+    (id: string, category: 'right' | 'coverage', currentStatus: MemberStatus) => {
       if (currentStatus === 'none') {
-        onStatusChange(type, 'owned');
+        onStatusChange(id, 'owned');
       } else if (currentStatus === 'owned') {
-        setSelectedNode({type, category, currentStatus});
-        const existing = member.coverageDetails?.[type];
+        setSelectedNode({type: id, category, currentStatus});
+        const existing = member.coverageDetails?.[id];
         if (category === 'coverage') {
           setInputMode('amount');
           setInputValue(existing?.amount?.toString() || '');
@@ -158,7 +175,7 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
           {
             text: '修改',
             onPress: () => {
-              setSelectedNode({type, category, currentStatus});
+              setSelectedNode({type: id, category, currentStatus});
               setInputMode(category === 'coverage' ? 'amount' : 'date');
             },
           },
@@ -186,12 +203,40 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
     setInputValue('');
   }, []);
 
-  // 渲染单圈（保障）- 19项排列成圈
+  // 处理节点长按 - 弹出状态选择菜单
+  const handleNodeLongPress = useCallback(
+    (id: string, category: 'right' | 'coverage', currentStatus: MemberStatus) => {
+      if (currentStatus === 'none') {
+        // 未有状态：直接标记为已有
+        onStatusChange(id, 'owned');
+      } else {
+        // 已有或理赔状态：弹出状态选择弹窗
+        setStatusPickerTarget({type: id, category, currentStatus});
+        setShowStatusPicker(true);
+      }
+    },
+    [onStatusChange]
+  );
+
+  // 状态选择弹窗确认
+  const handleStatusPickerConfirm = useCallback(
+    (newStatus: MemberStatus) => {
+      if (statusPickerTarget) {
+        onStatusChange(statusPickerTarget.type, newStatus);
+      }
+      setShowStatusPicker(false);
+      setStatusPickerTarget(null);
+    },
+    [statusPickerTarget, onStatusChange]
+  );
+
+  // 渲染单圈（保障）- 动态排列成圈
   const renderCoverageCircle = () => {
+    const coverages = getActiveCoverages();
     const circleSize = 280;
     const radius = 125;
     const nodeSize = 34;
-    const total = INSURANCE_COVERAGES.length;
+    const total = coverages.length;
     const startAngle = -Math.PI / 2;
 
     return (
@@ -200,15 +245,15 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
           styles.coverageCircleContainer,
           {width: circleSize, height: circleSize},
         ]}>
-        {INSURANCE_COVERAGES.map((coverage, index) => {
+        {coverages.map((coverage, index) => {
           const pos = getPositionOnCircle(index, total, radius, startAngle);
           // 从 coverage 数组获取状态
-          const coverageItem = member.coverage.find(c => c.type === coverage.type);
+          const coverageItem = member.coverage.find(c => c.id === coverage.id);
           const status: MemberStatus = coverageItem?.hasCoverage ? 'owned' : 'none';
 
           return (
             <View
-              key={coverage.type}
+              key={coverage.id}
               style={[
                 styles.nodeWrapper,
                 {
@@ -221,7 +266,8 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
                 status={status}
                 color={coverage.color}
                 size={nodeSize}
-                onPress={() => handleNodePress(coverage.type, 'coverage', status)}
+                onPress={() => handleNodePress(coverage.id, 'coverage', status)}
+                onLongPress={() => handleNodeLongPress(coverage.id, 'coverage', status)}
                 showAmount={coverageItem?.coverageAmount}
               />
             </View>
@@ -239,53 +285,56 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
     );
   };
 
-  // 渲染权益横排（8项两行排列）
+  // 渲染权益横排（动态两行排列）
   const renderRightsRow = () => {
+    const rights = getActiveRights();
     const nodeSize = 30;
-    const rightsPerRow = 4;
+    const rightsPerRow = Math.ceil(rights.length / 2);
 
     return (
       <View style={styles.rightsRowContainer}>
         <Text style={styles.rightsRowLabel}>保险权益</Text>
         <View style={styles.rightsRowGrid}>
           <View style={styles.rightsRowItems}>
-            {insuranceRights.slice(0, rightsPerRow).map(right => {
+            {rights.slice(0, rightsPerRow).map(right => {
               // 从 rights 数组获取状态
-              const rightItem = member.rights?.find(r => r.type === right.type);
+              const rightItem = member.rights?.find(r => r.id === right.id);
               const status: MemberStatus = rightItem?.hasRight ? 'owned' : 'none';
 
               return (
-                <View key={right.type} style={styles.rightsRowItem}>
+                <View key={right.id} style={styles.rightsRowItem}>
                   <CircleNode
                     label={right.shortLabel}
                     status={status}
                     color={right.color}
                     size={nodeSize}
-                    onPress={() => handleNodePress(right.type, 'right', status)}
+                    onPress={() => handleNodePress(right.id, 'right', status)}
+                    onLongPress={() => handleNodeLongPress(right.id, 'right', status)}
                     showDate={rightItem?.validityDate}
                   />
-                  <Text style={styles.rightsRowItemLabel}>{right.fullLabel}</Text>
+                  <Text style={styles.rightsRowItemLabel}>{right.label}</Text>
                 </View>
               );
             })}
           </View>
           <View style={styles.rightsRowItems}>
-            {insuranceRights.slice(rightsPerRow).map(right => {
+            {rights.slice(rightsPerRow).map(right => {
               // 从 rights 数组获取状态
-              const rightItem = member.rights?.find(r => r.type === right.type);
+              const rightItem = member.rights?.find(r => r.id === right.id);
               const status: MemberStatus = rightItem?.hasRight ? 'owned' : 'none';
 
               return (
-                <View key={right.type} style={styles.rightsRowItem}>
+                <View key={right.id} style={styles.rightsRowItem}>
                   <CircleNode
                     label={right.shortLabel}
                     status={status}
                     color={right.color}
                     size={nodeSize}
-                    onPress={() => handleNodePress(right.type, 'right', status)}
+                    onPress={() => handleNodePress(right.id, 'right', status)}
+                    onLongPress={() => handleNodeLongPress(right.id, 'right', status)}
                     showDate={rightItem?.validityDate}
                   />
-                  <Text style={styles.rightsRowItemLabel}>{right.fullLabel}</Text>
+                  <Text style={styles.rightsRowItemLabel}>{right.label}</Text>
                 </View>
               );
             })}
@@ -357,6 +406,51 @@ const MemberCircleEditor: React.FC<MemberCircleEditorProps> = ({
           </View>
         </View>
       </Modal>
+
+      {/* 状态选择弹窗 */}
+      <Modal
+        visible={showStatusPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowStatusPicker(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.statusPickerModal}>
+            <Text style={styles.statusPickerTitle}>选择状态</Text>
+            <TouchableOpacity
+              style={[
+                styles.statusPickerOption,
+                statusPickerTarget?.currentStatus === 'owned' && styles.statusPickerOptionSelected,
+              ]}
+              onPress={() => handleStatusPickerConfirm('owned')}>
+              <View style={[styles.statusDot, {backgroundColor: colors.functional.success}]} />
+              <Text style={styles.statusPickerOptionText}>已有保障</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.statusPickerOption,
+                statusPickerTarget?.currentStatus === 'claimed' && styles.statusPickerOptionSelected,
+              ]}
+              onPress={() => handleStatusPickerConfirm('claimed')}>
+              <View style={[styles.statusDot, {backgroundColor: colors.functional.danger}]} />
+              <Text style={styles.statusPickerOptionText}>已理赔</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.statusPickerOption,
+                statusPickerTarget?.currentStatus === 'none' && styles.statusPickerOptionSelected,
+              ]}
+              onPress={() => handleStatusPickerConfirm('none')}>
+              <View style={[styles.statusDot, {backgroundColor: '#E5E7EB'}]} />
+              <Text style={styles.statusPickerOptionText}>清除</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.statusPickerCancel}
+              onPress={() => setShowStatusPicker(false)}>
+              <Text style={styles.statusPickerCancelText}>取消</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -372,6 +466,7 @@ const FamilyOrganizationChart: React.FC<FamilyOrganizationChartProps> = ({
   onMemberPress,
 }) => {
   const {updateMember} = useFamily();
+  const {getActiveCoverages, getActiveRights} = useSettings();
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
 
   const selectedMember = useMemo(() => {
@@ -420,12 +515,27 @@ const FamilyOrganizationChart: React.FC<FamilyOrganizationChartProps> = ({
       const member = family.members.find(m => m.id === memberId);
       if (!member) return;
 
+      const coverages = getActiveCoverages();
+      const rights = getActiveRights();
+      
       // 更新 coverage 或 rights 数组
-      const isCoverageType = INSURANCE_COVERAGES.some(c => c.type === type);
+      const isCoverageType = coverages.some(c => c.id === type);
+      let updatedClaimedItems = member.claimedItems || [];
+      
+      // 处理 claimedItems 同步
+      if (status === 'claimed') {
+        // 新增理赔项
+        if (!updatedClaimedItems.includes(type)) {
+          updatedClaimedItems = [...updatedClaimedItems, type];
+        }
+      } else {
+        // 非理赔状态：从 claimedItems 中移除
+        updatedClaimedItems = updatedClaimedItems.filter(item => item !== type);
+      }
       
       if (isCoverageType) {
         const updatedCoverage = member.coverage.map(c => {
-          if (c.type === type) {
+          if (c.id === type) {
             return {
               ...c,
               hasCoverage: status !== 'none',
@@ -433,10 +543,10 @@ const FamilyOrganizationChart: React.FC<FamilyOrganizationChartProps> = ({
           }
           return c;
         });
-        updateMember(family.id, {...member, coverage: updatedCoverage});
+        updateMember(family.id, {...member, coverage: updatedCoverage, claimedItems: updatedClaimedItems});
       } else {
         const updatedRights = member.rights?.map(r => {
-          if (r.type === type) {
+          if (r.id === type) {
             return {
               ...r,
               hasRight: status !== 'none',
@@ -444,10 +554,10 @@ const FamilyOrganizationChart: React.FC<FamilyOrganizationChartProps> = ({
           }
           return r;
         }) ?? [];
-        updateMember(family.id, {...member, rights: updatedRights});
+        updateMember(family.id, {...member, rights: updatedRights, claimedItems: updatedClaimedItems});
       }
     },
-    [family, updateMember]
+    [family, updateMember, getActiveCoverages, getActiveRights]
   );
 
   const handleDetailSave = useCallback(
@@ -455,12 +565,15 @@ const FamilyOrganizationChart: React.FC<FamilyOrganizationChartProps> = ({
       const member = family.members.find(m => m.id === memberId);
       if (!member) return;
 
+      const coverages = getActiveCoverages();
+      const rights = getActiveRights();
+      
       // 更新 coverage 或 rights 数组
-      const isCoverageType = INSURANCE_COVERAGES.some(c => c.type === type);
+      const isCoverageType = coverages.some(c => c.id === type);
       
       if (isCoverageType) {
         const updatedCoverage = member.coverage.map(c => {
-          if (c.type === type) {
+          if (c.id === type) {
             return {
               ...c,
               coverageAmount: detail.amount ?? c.coverageAmount,
@@ -472,7 +585,7 @@ const FamilyOrganizationChart: React.FC<FamilyOrganizationChartProps> = ({
         updateMember(family.id, {...member, coverage: updatedCoverage});
       } else {
         const updatedRights = member.rights?.map(r => {
-          if (r.type === type) {
+          if (r.id === type) {
             return {
               ...r,
               validityDate: detail.validityDate ?? r.validityDate,
@@ -483,7 +596,7 @@ const FamilyOrganizationChart: React.FC<FamilyOrganizationChartProps> = ({
         updateMember(family.id, {...member, rights: updatedRights});
       }
     },
-    [family, updateMember]
+    [family, updateMember, getActiveCoverages, getActiveRights]
   );
 
   // 渲染成员选择卡片
@@ -815,6 +928,53 @@ const styles = StyleSheet.create({
   },
   modalBtnTextConfirm: {
     color: colors.text[3],
+  },
+
+  // 状态选择弹窗
+  statusPickerModal: {
+    width: SCREEN_WIDTH * 0.75,
+    backgroundColor: colors.background[1],
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+  },
+  statusPickerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text[0],
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+  },
+  statusPickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm,
+    marginBottom: spacing.xs,
+  },
+  statusPickerOptionSelected: {
+    backgroundColor: colors.primary[0] + '15',
+  },
+  statusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: spacing.md,
+  },
+  statusPickerOptionText: {
+    fontSize: 15,
+    color: colors.text[0],
+  },
+  statusPickerCancel: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: colors.card.border,
+  },
+  statusPickerCancelText: {
+    fontSize: 15,
+    color: colors.text[2],
   },
 });
 

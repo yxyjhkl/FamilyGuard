@@ -15,9 +15,10 @@ import {colors, spacing, borderRadius} from '../../theme';
 import type {Family, Member} from '../../types';
 import {MEMBER_ROLE_LABELS} from '../../types';
 import RoleAvatar from '../common/RoleAvatar';
-import {insuranceRights} from '../../data/insuranceRights';
-import {INSURANCE_COVERAGES} from '../../constants/insurance';
 import {useFamily} from '../../hooks/useFamily';
+import {useSettings} from '../../store/settingsStore';
+import {DEFAULT_COVERAGES} from '../../data/defaultCoverages';
+import {DEFAULT_RIGHTS} from '../../data/defaultRights';
 
 // 状态枚举
 type MemberStatus = 'none' | 'owned' | 'claimed';
@@ -45,6 +46,7 @@ interface CircleNodeProps {
   color: string;
   size?: number;
   onPress?: () => void;
+  onLongPress?: () => void;
 }
 
 const CircleNode: React.FC<CircleNodeProps> = ({
@@ -53,13 +55,21 @@ const CircleNode: React.FC<CircleNodeProps> = ({
   color,
   size = 22,
   onPress,
+  onLongPress,
 }) => {
+  // 检查颜色是否为红色系（避免与已理赔状态混淆）
+  const isRedColor = (c: string) => {
+    if (c === '#E74C3C' || c === '#FF3B30' || c === '#C0392B') return true;
+    return false;
+  };
+
   const getBackgroundColor = () => {
     switch (status) {
       case 'owned':
         return color;
       case 'claimed':
-        return colors.functional.danger;
+        // 如果保障项目本身就是红色，已理赔用深棕色区分
+        return isRedColor(color) ? '#5D4037' : colors.functional.danger;
       case 'none':
       default:
         return '#E5E7EB';
@@ -85,8 +95,9 @@ const CircleNode: React.FC<CircleNodeProps> = ({
         },
       ]}
       onPress={onPress}
+      onLongPress={onLongPress}
       activeOpacity={0.7}
-      disabled={!onPress}>
+      disabled={!onPress && !onLongPress}>
       <Text
         style={[
           styles.circleNodeText,
@@ -102,42 +113,87 @@ const CircleNode: React.FC<CircleNodeProps> = ({
 // 单个成员保障展示卡片
 interface MemberCoverageCardProps {
   member: Member;
+  coverages: typeof DEFAULT_COVERAGES;
+  rights: typeof DEFAULT_RIGHTS;
   onStatusChange: (type: string, status: MemberStatus) => void;
 }
 
 const MemberCoverageCard: React.FC<MemberCoverageCardProps> = ({
   member,
+  coverages,
+  rights,
   onStatusChange,
 }) => {
+  const [showStatusPicker, setShowStatusPicker] = useState(false);
+  const [statusPickerTarget, setStatusPickerTarget] = useState<{
+    type: string;
+    category: 'right' | 'coverage';
+    currentStatus: MemberStatus;
+  } | null>(null);
+
+  // 判断是否为男性角色
+  const isMale = ['father', 'husband', 'son', 'grandfather', 'other'].includes(member.role);
+  
+  // 过滤后的保障列表：男性不显示孕妇保障
+  const visibleCoverages = isMale 
+    ? coverages.filter(c => c.id !== 'maternity')
+    : coverages;
+
   const getMemberAvatarColor = () => {
     const role = MEMBER_ROLE_LABELS[member.role];
     if (role === '父亲' || role === '丈夫') return colors.primary[1];
-  if (role === '母亲' || role === '妻子') return '#E91E63';
-  if (['爷爷', '奶奶', '外公', '外婆'].includes(role)) return '#FF9800';
-  return colors.functional.info;
-};
+    if (role === '母亲' || role === '妻子') return '#E91E63';
+    if (['爷爷', '奶奶', '外公', '外婆'].includes(role)) return '#FF9800';
+    return colors.functional.info;
+  };
 
-  // 渲染内圈保障（完整19项，分两圈排列）
+  // 处理节点长按 - 弹出状态选择菜单
+  const handleNodeLongPress = useCallback(
+    (id: string, category: 'right' | 'coverage', currentStatus: MemberStatus) => {
+      if (currentStatus === 'none') {
+        // 未有状态：直接标记为已有
+        onStatusChange(id, 'owned');
+      } else {
+        // 已有或理赔状态：弹出状态选择弹窗
+        setStatusPickerTarget({type: id, category, currentStatus});
+        setShowStatusPicker(true);
+      }
+    },
+    [onStatusChange]
+  );
+
+  // 状态选择弹窗确认
+  const handleStatusPickerConfirm = useCallback(
+    (newStatus: MemberStatus) => {
+      if (statusPickerTarget) {
+        onStatusChange(statusPickerTarget.type, newStatus);
+      }
+      setShowStatusPicker(false);
+      setStatusPickerTarget(null);
+    },
+    [statusPickerTarget, onStatusChange]
+  );
+
+  // 渲染内圈保障（分两圈排列）
   const renderInnerCircle = () => {
-    const allCoverages = INSURANCE_COVERAGES; // 显示全部19项保障
     const circleSize = 160;
     const innerRadius = 55;
     const outerRadius = 75;
     const nodeSize = 22;
-    const innerCount = 9;  // 内圈9项
-    const outerCount = 10; // 外圈10项（19项总计）
+    const innerCount = Math.ceil(visibleCoverages.length / 2);  // 内圈
+    const outerCount = Math.floor(visibleCoverages.length / 2); // 外圈
 
     return (
       <View style={[styles.innerCircleContainer, {width: circleSize, height: circleSize}]}>
-        {/* 内圈 - 前9项 */}
-        {allCoverages.slice(0, innerCount).map((coverage, index) => {
+        {/* 内圈 - 前 half 项 */}
+        {visibleCoverages.slice(0, innerCount).map((coverage, index) => {
           const pos = getPositionOnCircle(index, innerCount, innerRadius, -Math.PI / 2);
-          const coverageItem = member.coverage.find(c => c.type === coverage.type);
+          const coverageItem = member.coverage.find(c => c.id === coverage.id);
           const status: MemberStatus = coverageItem?.hasCoverage ? 'owned' : 'none';
 
           return (
             <View
-              key={coverage.type}
+              key={coverage.id}
               style={[
                 styles.nodeWrapper,
                 {
@@ -152,22 +208,23 @@ const MemberCoverageCard: React.FC<MemberCoverageCardProps> = ({
                 size={nodeSize}
                 onPress={() => {
                   if (status === 'none') {
-                    onStatusChange(coverage.type, 'owned');
+                    onStatusChange(coverage.id, 'owned');
                   }
                 }}
+                onLongPress={() => handleNodeLongPress(coverage.id, 'coverage', status)}
               />
             </View>
           );
         })}
-        {/* 外圈 - 后9项 */}
-        {allCoverages.slice(innerCount).map((coverage, index) => {
-          const pos = getPositionOnCircle(index, outerCount, outerRadius, -Math.PI / 2 + Math.PI / outerCount);
-          const coverageItem = member.coverage.find(c => c.type === coverage.type);
+        {/* 外圈 - 后半部分 */}
+        {visibleCoverages.slice(innerCount).map((coverage, index) => {
+          const pos = getPositionOnCircle(index, outerCount, outerRadius, -Math.PI / 2 + Math.PI / Math.max(outerCount, 1));
+          const coverageItem = member.coverage.find(c => c.id === coverage.id);
           const status: MemberStatus = coverageItem?.hasCoverage ? 'owned' : 'none';
 
           return (
             <View
-              key={coverage.type}
+              key={coverage.id}
               style={[
                 styles.nodeWrapper,
                 {
@@ -182,9 +239,10 @@ const MemberCoverageCard: React.FC<MemberCoverageCardProps> = ({
                 size={nodeSize}
                 onPress={() => {
                   if (status === 'none') {
-                    onStatusChange(coverage.type, 'owned');
+                    onStatusChange(coverage.id, 'owned');
                   }
                 }}
+                onLongPress={() => handleNodeLongPress(coverage.id, 'coverage', status)}
               />
             </View>
           );
@@ -201,55 +259,57 @@ const MemberCoverageCard: React.FC<MemberCoverageCardProps> = ({
     );
   };
 
-  // 渲染外圈权益（完整8项，分两排）
+  // 渲染外圈权益（分两排）
   const renderOuterRights = () => {
-    const allRights = insuranceRights; // 显示全部8项权益
     const nodeSize = 24;
+    const halfRights = Math.ceil(rights.length / 2);
 
     return (
       <View style={styles.outerRightsContainer}>
-        <Text style={styles.outerRightsLabel}>权益（8项）</Text>
+        <Text style={styles.outerRightsLabel}>权益（{rights.length}项）</Text>
         <View style={styles.outerRightsGrid}>
-          {/* 第一排 - 前4项 */}
+          {/* 第一排 */}
           <View style={styles.outerRightsRow}>
-            {allRights.slice(0, 4).map(right => {
-              const rightItem = member.rights?.find(r => r.type === right.type);
+            {rights.slice(0, halfRights).map(right => {
+              const rightItem = member.rights?.find(r => r.id === right.id);
               const status: MemberStatus = rightItem?.hasRight ? 'owned' : 'none';
 
               return (
                 <CircleNode
-                  key={right.type}
+                  key={right.id}
                   label={right.shortLabel}
                   status={status}
                   color={right.color}
                   size={nodeSize}
                   onPress={() => {
                     if (status === 'none') {
-                      onStatusChange(right.type, 'owned');
+                      onStatusChange(right.id, 'owned');
                     }
                   }}
+                  onLongPress={() => handleNodeLongPress(right.id, 'right', status)}
                 />
               );
             })}
           </View>
-          {/* 第二排 - 后4项 */}
+          {/* 第二排 */}
           <View style={styles.outerRightsRow}>
-            {allRights.slice(4).map(right => {
-              const rightItem = member.rights?.find(r => r.type === right.type);
+            {rights.slice(halfRights).map(right => {
+              const rightItem = member.rights?.find(r => r.id === right.id);
               const status: MemberStatus = rightItem?.hasRight ? 'owned' : 'none';
 
               return (
                 <CircleNode
-                  key={right.type}
+                  key={right.id}
                   label={right.shortLabel}
                   status={status}
                   color={right.color}
                   size={nodeSize}
                   onPress={() => {
                     if (status === 'none') {
-                      onStatusChange(right.type, 'owned');
+                      onStatusChange(right.id, 'owned');
                     }
                   }}
+                  onLongPress={() => handleNodeLongPress(right.id, 'right', status)}
                 />
               );
             })}
@@ -274,7 +334,7 @@ const MemberCoverageCard: React.FC<MemberCoverageCardProps> = ({
 
       {/* 内圈保障 */}
       <View style={styles.coverageSection}>
-        <Text style={styles.sectionLabel}>保障（19项）</Text>
+        <Text style={styles.sectionLabel}>保障（{visibleCoverages.length}项）</Text>
         <View style={styles.coverageCircleWrapper}>
           {renderInnerCircle()}
         </View>
@@ -284,7 +344,55 @@ const MemberCoverageCard: React.FC<MemberCoverageCardProps> = ({
       {renderOuterRights()}
 
       {/* 点击提示 */}
-      <Text style={styles.tapHint}>点击灰色圆圈添加保障</Text>
+      <View style={styles.hintContainer}>
+        <Text style={styles.tapHint}>💡 点击灰色圆圈添加保障</Text>
+        <Text style={styles.tapHint}>📌 有理赔过请长按彩色圈圈</Text>
+      </View>
+
+      {/* 状态选择弹窗 */}
+      <Modal
+        visible={showStatusPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowStatusPicker(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.statusPickerModal}>
+            <Text style={styles.statusPickerTitle}>选择状态</Text>
+            <TouchableOpacity
+              style={[
+                styles.statusPickerOption,
+                statusPickerTarget?.currentStatus === 'owned' && styles.statusPickerOptionSelected,
+              ]}
+              onPress={() => handleStatusPickerConfirm('owned')}>
+              <View style={[styles.statusDot, {backgroundColor: colors.functional.success}]} />
+              <Text style={styles.statusPickerOptionText}>已有保障</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.statusPickerOption,
+                statusPickerTarget?.currentStatus === 'claimed' && styles.statusPickerOptionSelected,
+              ]}
+              onPress={() => handleStatusPickerConfirm('claimed')}>
+              <View style={[styles.statusDot, {backgroundColor: colors.functional.danger}]} />
+              <Text style={styles.statusPickerOptionText}>已理赔</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.statusPickerOption,
+                statusPickerTarget?.currentStatus === 'none' && styles.statusPickerOptionSelected,
+              ]}
+              onPress={() => handleStatusPickerConfirm('none')}>
+              <View style={[styles.statusDot, {backgroundColor: '#E5E7EB'}]} />
+              <Text style={styles.statusPickerOptionText}>清除</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.statusPickerCancel}
+              onPress={() => setShowStatusPicker(false)}>
+              <Text style={styles.statusPickerCancelText}>取消</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -392,36 +500,68 @@ const FamilyCustomChart: React.FC<FamilyCustomChartProps> = ({
   family,
 }) => {
   const {updateMember, addMember} = useFamily();
+  
+  // 从设置中获取动态保障和权益配置
+  const {customCoverages, customRights} = useSettings();
+  const coverages = Array.isArray(customCoverages) && customCoverages.length > 0 ? customCoverages : DEFAULT_COVERAGES;
+  const rights = Array.isArray(customRights) && customRights.length > 0 ? customRights : DEFAULT_RIGHTS;
+
+  // 判断是否为男性角色
+  const isMaleRole = (role: Member['role']) => {
+    return ['father', 'husband', 'son', 'grandfather', 'other'].includes(role);
+  };
 
   const handleStatusChange = useCallback(
     (memberId: string, type: string, status: MemberStatus) => {
       const member = family.members.find(m => m.id === memberId);
       if (!member) return;
 
+      // 孕妇保障限制：男性不能添加孕妇保障
+      if (type === 'maternity' && status !== 'none' && isMaleRole(member.role)) {
+        Alert.alert('无法添加', `${MEMBER_ROLE_LABELS[member.role]}${member.name} 不能添加孕妇保障`);
+        return;
+      }
+
       // 更新 coverage 或 rights 数组
-      const isCoverageType = INSURANCE_COVERAGES.some(c => c.type === type);
+      const isCoverageType = coverages.some(c => c.id === type);
       
       if (isCoverageType) {
-        const updatedCoverage = member.coverage.map(c => {
-          if (c.type === type) {
-            return {
-              ...c,
-              hasCoverage: status !== 'none',
-            };
-          }
-          return c;
-        });
+        const existingCoverage = member.coverage.find(c => c.id === type);
+        let updatedCoverage: typeof member.coverage;
+        
+        if (existingCoverage) {
+          // 如果保障项已存在，更新状态
+          updatedCoverage = member.coverage.map(c =>
+            c.id === type ? { ...c, hasCoverage: status !== 'none' } : c
+          );
+        } else if (status !== 'none') {
+          // 如果保障项不存在且状态不是"无"，先添加再设置状态
+          updatedCoverage = [
+            ...member.coverage,
+            { id: type, hasCoverage: true }
+          ];
+        } else {
+          updatedCoverage = member.coverage;
+        }
         updateMember(family.id, {...member, coverage: updatedCoverage});
       } else {
-        const updatedRights = member.rights?.map(r => {
-          if (r.type === type) {
-            return {
-              ...r,
-              hasRight: status !== 'none',
-            };
-          }
-          return r;
-        }) ?? [];
+        const existingRight = member.rights?.find(r => r.id === type);
+        let updatedRights: typeof member.rights;
+        
+        if (existingRight) {
+          // 如果权益项已存在，更新状态
+          updatedRights = member.rights?.map(r =>
+            r.id === type ? { ...r, hasRight: status !== 'none' } : r
+          ) ?? [];
+        } else if (status !== 'none') {
+          // 如果权益项不存在且状态不是"无"，先添加再设置状态
+          updatedRights = [
+            ...(member.rights ?? []),
+            { id: type, hasRight: true }
+          ];
+        } else {
+          updatedRights = member.rights ?? [];
+        }
         updateMember(family.id, {...member, rights: updatedRights});
       }
     },
@@ -440,7 +580,7 @@ const FamilyCustomChart: React.FC<FamilyCustomChartProps> = ({
       {/* 标题 */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{family.name}</Text>
-        <Text style={styles.headerSubtitle}>点击灰色圆圈快速添加保障</Text>
+        <Text style={styles.headerSubtitle}>💡 点击灰色圆圈添加保障 | 长按圆圈修改状态</Text>
       </View>
 
       {/* 成员卡片列表 */}
@@ -452,6 +592,8 @@ const FamilyCustomChart: React.FC<FamilyCustomChartProps> = ({
           <MemberCoverageCard
             key={member.id}
             member={member}
+            coverages={coverages}
+            rights={rights}
             onStatusChange={(type, status) =>
               handleStatusChange(member.id, type, status)
             }
@@ -596,11 +738,70 @@ const styles = StyleSheet.create({
   },
 
   // 点击提示
-  tapHint: {
-    fontSize: 10,
-    color: colors.text[2],
+  hintContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.md,
     marginTop: spacing.sm,
+    flexWrap: 'wrap',
+  },
+  tapHint: {
+    fontSize: 11,
+    color: colors.text[2],
     fontStyle: 'italic',
+  },
+
+  // 弹窗通用样式
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  statusPickerModal: {
+    width: 280,
+    backgroundColor: colors.background[1],
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+  },
+  statusPickerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text[0],
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+  },
+  statusPickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm,
+    marginBottom: spacing.xs,
+  },
+  statusPickerOptionSelected: {
+    backgroundColor: colors.primary[0] + '15',
+  },
+  statusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: spacing.md,
+  },
+  statusPickerOptionText: {
+    fontSize: 15,
+    color: colors.text[0],
+  },
+  statusPickerCancel: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: colors.card.border,
+  },
+  statusPickerCancelText: {
+    fontSize: 15,
+    color: colors.text[2],
   },
 
   // 添加成员卡片

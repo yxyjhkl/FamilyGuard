@@ -1,14 +1,14 @@
 // src/components/insurance/RightsGrid.tsx
 import React from 'react';
-import {View, Text, StyleSheet, TouchableOpacity} from 'react-native';
-import {colors, typography, spacing, borderRadius} from '../../theme';
-import type {Right} from '../../types';
+import {View, Text, StyleSheet} from 'react-native';
+import {colors, typography, spacing} from '../../theme';
+import type {MemberRight} from '../../types';
 import RightsChip from './RightsChip';
 
 interface RightsGridProps {
-  rights: Right[];
-  onToggle: (index: number) => void;
-  onUpdate: (index: number, field: 'validityDate' | 'notes', value: string) => void;
+  rights: MemberRight[];
+  onToggle: (id: string) => void;
+  onUpdate: (id: string, field: 'validityDate' | 'notes', value: string) => void;
 }
 
 const RightsGrid: React.FC<RightsGridProps> = ({rights, onToggle, onUpdate}) => {
@@ -22,12 +22,12 @@ const RightsGrid: React.FC<RightsGridProps> = ({rights, onToggle, onUpdate}) => 
 
   return (
     <View style={styles.grid}>
-      {rights.map((right, index) => (
+      {rights.map(right => (
         <RightsChip
-          key={right.type}
+          key={right.id}
           right={right}
-          onToggle={() => onToggle(index)}
-          onUpdate={(field, value) => onUpdate(index, field, value)}
+          onToggle={() => onToggle(right.id)}
+          onUpdate={(field, value) => onUpdate(right.id, field, value)}
         />
       ))}
     </View>

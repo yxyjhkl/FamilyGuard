@@ -5,20 +5,23 @@ import {PaperProvider} from 'react-native-paper';
 import {FamilyProvider} from './src/store/familyStore';
 import {SettingsProvider} from './src/store/settingsStore';
 import AppNavigator from './src/navigation/AppNavigator';
+import ErrorBoundary from './src/components/common/ErrorBoundary';
 import {theme} from './src/theme';
 
 const App: React.FC = () => {
   return (
     <View style={{flex: 1}}>
-      <PaperProvider theme={theme}>
-        <FamilyProvider>
-          <SettingsProvider>
-            <NavigationContainer>
-              <AppNavigator />
-            </NavigationContainer>
-          </SettingsProvider>
-        </FamilyProvider>
-      </PaperProvider>
+      <ErrorBoundary fallbackMessage="应用遇到意外错误，请重新加载">
+        <PaperProvider theme={theme}>
+          <FamilyProvider>
+            <SettingsProvider>
+              <NavigationContainer>
+                <AppNavigator />
+              </NavigationContainer>
+            </SettingsProvider>
+          </FamilyProvider>
+        </PaperProvider>
+      </ErrorBoundary>
     </View>
   );
 };

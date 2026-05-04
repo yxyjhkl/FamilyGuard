@@ -1,17 +1,28 @@
 // src/components/insurance/RightsChip.tsx
-import React, {useState} from 'react';
+import React, {useState, useMemo} from 'react';
 import {View, Text, StyleSheet, TouchableOpacity, TextInput} from 'react-native';
 import {colors, typography, spacing, borderRadius} from '../../theme';
-import type {Right} from '../../types';
+import type {MemberRight, RightConfig} from '../../types';
+import {useSettings} from '../../store/settingsStore';
 
 interface RightsChipProps {
-  right: Right;
+  right: MemberRight;
   onToggle: () => void;
   onUpdate: (field: 'validityDate' | 'notes', value: string) => void;
 }
 
 const RightsChip: React.FC<RightsChipProps> = ({right, onToggle, onUpdate}) => {
   const [expanded, setExpanded] = useState(false);
+  const {getRightConfig} = useSettings();
+
+  // 获取权益配置信息
+  const config: RightConfig | undefined = useMemo(() => {
+    return getRightConfig(right.id);
+  }, [right.id, getRightConfig]);
+
+  const label = config?.label || right.id;
+  const icon = config?.icon || '✨';
+  const color = config?.color || colors.primary[1];
 
   return (
     <View style={styles.chipOuter}>
@@ -19,6 +30,7 @@ const RightsChip: React.FC<RightsChipProps> = ({right, onToggle, onUpdate}) => {
         style={[
           styles.chip,
           right.hasRight && styles.chipActive,
+          right.hasRight && {borderColor: color},
         ]}
         onPress={() => {
           onToggle();
@@ -26,9 +38,10 @@ const RightsChip: React.FC<RightsChipProps> = ({right, onToggle, onUpdate}) => {
         }}
         onLongPress={() => right.hasRight && setExpanded(!expanded)}
         activeOpacity={0.7}>
-        <View style={[styles.indicator, {backgroundColor: right.hasRight ? colors.functional.success : colors.text[2]}]} />
+        <Text style={styles.chipIcon}>{icon}</Text>
+        <View style={[styles.indicator, {backgroundColor: right.hasRight ? color : colors.text[2]}]} />
         <Text style={[styles.chipText, right.hasRight && styles.chipTextActive]}>
-          {right.label}
+          {label}
         </Text>
       </TouchableOpacity>
 
@@ -71,12 +84,15 @@ const styles = StyleSheet.create({
   },
   chipActive: {
     backgroundColor: '#E8F8E8',
-    borderColor: colors.functional.success,
+  },
+  chipIcon: {
+    fontSize: 16,
+    marginRight: spacing.xs,
   },
   indicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     marginRight: spacing.sm,
   },
   chipText: {
@@ -85,7 +101,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   chipTextActive: {
-    color: '#1E7E34',
     fontWeight: '600',
   },
   details: {

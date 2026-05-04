@@ -2,19 +2,23 @@
 import React from 'react';
 import {View, Text, StyleSheet} from 'react-native';
 import {colors, typography, spacing, borderRadius} from '../../theme';
-import type {Coverage} from '../../types';
+import type {MemberCoverage} from '../../types';
 import CoverageItem from './CoverageItem';
-import StatusBadge from '../common/StatusBadge';
-import {getCoverageStatusText, getCoverageStatusColor, COVERAGE_COLORS} from '../../utils/colorUtils';
+
+// 废弃的旧版保障项ID列表
+const DEPRECATED_COVERAGE_IDS = ['shortTermFree', 'shortTerm', 'free'];
 
 interface CoverageSectionProps {
-  coverage: Coverage[];
-  onToggle: (index: number) => void;
-  onUpdate: (index: number, field: 'coverageAmount' | 'gapAmount' | 'policyDetails' | 'recommendedAmount', value: string | number) => void;
+  coverage: MemberCoverage[];
+  onToggle: (id: string) => void;
+  onUpdate: (id: string, field: 'coverageAmount' | 'gapAmount' | 'policyDetails' | 'recommendedAmount' | 'premium', value: string | number) => void;
 }
 
 const CoverageSection: React.FC<CoverageSectionProps> = ({coverage, onToggle, onUpdate}) => {
-  if (coverage.length === 0) {
+  // 过滤掉废弃的旧版保障项
+  const visibleCoverage = coverage.filter(item => !DEPRECATED_COVERAGE_IDS.includes(item.id));
+
+  if (visibleCoverage.length === 0) {
     return (
       <View style={styles.empty}>
         <Text style={styles.emptyText}>暂无保障配置</Text>
@@ -24,12 +28,12 @@ const CoverageSection: React.FC<CoverageSectionProps> = ({coverage, onToggle, on
 
   return (
     <View style={styles.section}>
-      {coverage.map((item, index) => (
+      {visibleCoverage.map(item => (
         <CoverageItem
-          key={item.type}
+          key={item.id}
           coverage={item}
-          onToggle={() => onToggle(index)}
-          onAmountChange={field => (value: string) => onUpdate(index, field, value)}
+          onToggle={() => onToggle(item.id)}
+          onAmountChange={field => (value: string) => onUpdate(item.id, field, value)}
         />
       ))}
     </View>

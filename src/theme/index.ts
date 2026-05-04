@@ -28,6 +28,6 @@ export const theme: MD3Theme = {
   fonts: configureFonts({config: fontConfig}),
 };
 
-export {colors} from './colors';
+export {colors, type Colors, type FunctionalColors} from './colors';
 export {typography} from './typography';
 export {spacing, borderRadius, iconSize} from './spacing';
