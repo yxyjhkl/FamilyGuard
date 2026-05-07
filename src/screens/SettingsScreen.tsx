@@ -17,7 +17,9 @@ import {
   Switch,
   Image,
   Linking,
+  PermissionsAndroid,
 } from 'react-native';
+import {saveAssetToGallery} from '../native/ImageSaver';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '../types';
 import type {CoverageType} from '../types';
@@ -26,6 +28,7 @@ import {mottoList} from '../data/mottoList';
 import {useSettings, hasCustomAmounts, getCustomCount, isAgentInfoComplete, getDefaultAmount} from '../store/settingsStore';
 import {aiService, AI_PROVIDERS, type AIProvider} from '../services/aiService';
 import {storageService} from '../store/storageService';
+import {isWechatInstalled, isAlipayInstalled, WECHAT_SCHEME, ALIPAY_SCHEME} from '../native/AppChecker';
 import AppHeader from '../components/common/AppHeader';
 import {colors, typography, spacing, borderRadius} from '../theme';
 import CoverageConfigEditor from '../components/settings/CoverageConfigEditor';
@@ -169,31 +172,75 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
     Alert.alert('保存成功', '默认金句已设置');
   }, [setDefaultMotto]);
 
+  // 保存二维码到相册
+  const saveQrCodeToGallery = useCallback(async (appType: 'wechat' | 'alipay') => {
+    const assetPath = appType === 'wechat' ? 'weichatpay.jpg' : 'alipay.jpg';
+
+    try {
+      // Android 13+ (API 33) 需要 READ_MEDIA_IMAGES 权限
+      if (Platform.OS === 'android') {
+        const androidVersion = parseInt(String(Platform.Version), 10);
+        if (androidVersion >= 33) {
+          const result = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+            {
+              title: '存储权限',
+              message: '需要存储权限来保存收款码到相册',
+              buttonNeutral: '稍后询问',
+              buttonNegative: '取消',
+              buttonPositive: '确定',
+            },
+          );
+          if (result !== PermissionsAndroid.RESULTS.GRANTED) {
+            Alert.alert('权限不足', '请在设置中开启存储权限');
+            return;
+          }
+        }
+        // Android 12 及以下版本不需要运行时权限（使用 MediaStore）
+      }
+
+      // 使用 Native Module 保存图片到相册
+      await saveAssetToGallery(assetPath, assetPath);
+      
+      Alert.alert(
+        '保存成功',
+        `已将${appType === 'wechat' ? '微信' : '支付宝'}收款码保存到相册`,
+        [{text: '确定'}]
+      );
+    } catch (error) {
+      console.error('保存失败:', error);
+      Alert.alert('保存失败', '请检查是否有存储权限');
+    }
+  }, []);
+
   // 打开App扫一扫
   const handleOpenQrScanner = useCallback(async (appType: 'wechat' | 'alipay') => {
-    // App的URL Scheme
-    const schemes = {
+    // App配置
+    const appConfig = {
       wechat: {
-        scheme: 'weixin://scanQRCode',
+        scheme: WECHAT_SCHEME,
         name: '微信',
         appStoreUrl: 'https://apps.apple.com/cn/app/wechat/id414478124',
+        checkInstalled: isWechatInstalled,
       },
       alipay: {
-        scheme: 'alipays://platformapi/startapp?appId=20000056',
+        scheme: ALIPAY_SCHEME,
         name: '支付宝',
         appStoreUrl: 'https://apps.apple.com/cn/app/zhifubao/id333206289',
+        checkInstalled: isAlipayInstalled,
       },
     };
 
-    const app = schemes[appType];
+    const app = appConfig[appType];
 
     try {
-      const canOpen = await Linking.canOpenURL(app.scheme);
-      
-      if (canOpen) {
-        await Linking.openURL(app.scheme);
-      } else {
-        // App未安装，提示安装
+      // Android: 先用 Native Module 检测是否安装
+      let isInstalled = true;
+      if (Platform.OS === 'android') {
+        isInstalled = await app.checkInstalled();
+      }
+
+      if (!isInstalled) {
         Alert.alert(
           `${app.name}未安装`,
           `请先安装${app.name}后再使用扫码功能`,
@@ -205,6 +252,32 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
             },
           ],
         );
+        return;
+      }
+
+      // 尝试打开 App
+      const canOpen = await Linking.canOpenURL(app.scheme);
+      
+      if (canOpen) {
+        await Linking.openURL(app.scheme);
+      } else {
+        // 微信在 Android 上 canOpenURL 可能返回 false，但实际可以打开
+        // 直接尝试打开，失败再提示
+        if (appType === 'wechat') {
+          await Linking.openURL(app.scheme);
+        } else {
+          Alert.alert(
+            `${app.name}未安装`,
+            `请先安装${app.name}后再使用扫码功能`,
+            [
+              {text: '取消', style: 'cancel'},
+              {
+                text: '去下载',
+                onPress: () => Linking.openURL(app.appStoreUrl),
+              },
+            ],
+          );
+        }
       }
     } catch (error) {
       console.error('打开扫码失败:', error);
@@ -728,6 +801,17 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
                 <Text style={styles.aboutLabel}>版本</Text>
                 <Text style={styles.aboutValue}>V2.3.2</Text>
               </View>
+              <TouchableOpacity
+                style={styles.aboutItem}
+                onPress={() =>
+                  Linking.openURL(
+                    'https://yxyjhkl.github.io/FamilyGuard/privacy.html',
+                  )
+                }
+                activeOpacity={0.7}>
+                <Text style={styles.aboutLabel}>隐私政策</Text>
+                <Text style={[styles.aboutValue, {color: '#0071e3'}]}>查看 ▼</Text>
+              </TouchableOpacity>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>作者</Text>
                 <Text style={styles.aboutValue}>泽麟保服技术中心</Text>
@@ -905,6 +989,20 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
                 4. 点击保存即可使用 AI 分析功能
               </Text>
             </View>
+
+            {/* 话术管理入口 */}
+            <View style={styles.aiTips}>
+              <Text style={styles.aiTipsTitle}>💬 话术管理</Text>
+              <TouchableOpacity
+                style={styles.speechManagementBtn}
+                onPress={() => navigation.navigate('SpeechManagement')}
+                activeOpacity={0.7}>
+                <Text style={styles.speechManagementBtnText}>自定义话术管理 →</Text>
+              </TouchableOpacity>
+              <Text style={styles.aiTipsText}>
+                管理自定义话术，支持导入/导出JSON
+              </Text>
+            </View>
           </View>
         )}
 
@@ -946,30 +1044,34 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
             <View style={styles.donationItem}>
               <Text style={styles.donationTitle}>💖 微信赞赏</Text>
               <TouchableOpacity
-                onPress={() => handleOpenQrScanner('wechat')}
-                activeOpacity={0.8}>
+                onPress={() => saveQrCodeToGallery('wechat')}
+                onLongPress={() => handleOpenQrScanner('wechat')}
+                activeOpacity={0.8}
+                delayLongPress={500}>
                 <Image
                   source={require('../../android/app/src/main/assets/weichatpay.jpg')}
                   style={styles.donationQrCode}
                   resizeMode="contain"
                 />
               </TouchableOpacity>
-              <Text style={styles.donationHint}>点击直接打开微信扫一扫</Text>
+              <Text style={styles.donationHint}>点击保存到相册 · 长按打开微信扫一扫</Text>
             </View>
 
             {/* 支付宝收款码 */}
             <View style={styles.donationItem}>
               <Text style={styles.donationTitle}>🧧 支付宝收款</Text>
               <TouchableOpacity
-                onPress={() => handleOpenQrScanner('alipay')}
-                activeOpacity={0.8}>
+                onPress={() => saveQrCodeToGallery('alipay')}
+                onLongPress={() => handleOpenQrScanner('alipay')}
+                activeOpacity={0.8}
+                delayLongPress={500}>
                 <Image
                   source={require('../../android/app/src/main/assets/alipay.jpg')}
                   style={styles.donationQrCode}
                   resizeMode="contain"
                 />
               </TouchableOpacity>
-              <Text style={styles.donationHint}>点击直接打开支付宝扫一扫</Text>
+              <Text style={styles.donationHint}>点击保存到相册 · 长按打开支付宝扫一扫</Text>
             </View>
 
             <View style={styles.coffeeThanks}>
@@ -1818,6 +1920,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.text[1],
     lineHeight: 20,
+  },
+  speechManagementBtn: {
+    backgroundColor: colors.primary[1],  // 使用明确的蓝色
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    alignSelf: 'flex-start',
+    marginBottom: spacing.sm,
+  },
+  speechManagementBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 13,
   },
 });
 
