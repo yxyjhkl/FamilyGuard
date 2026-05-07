@@ -814,11 +814,11 @@ const SettingsScreen: React.FC<Props> = ({navigation}) => {
               </TouchableOpacity>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>作者</Text>
-                <Text style={styles.aboutValue}>泽麟保服技术中心</Text>
+                <Text style={styles.aboutValue}>何克霖</Text>
               </View>
               <View style={styles.aboutItem}>
                 <Text style={styles.aboutLabel}>版权所有</Text>
-                <Text style={styles.aboutValue}>© 2026-2030 泽麟保服技术中心</Text>
+                <Text style={styles.aboutValue}>© 2026-2030 何克霖</Text>
               </View>
             </View>
           </View>
