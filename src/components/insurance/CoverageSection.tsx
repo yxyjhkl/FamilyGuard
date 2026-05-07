@@ -12,11 +12,14 @@ interface CoverageSectionProps {
   coverage: MemberCoverage[];
   onToggle: (id: string) => void;
   onUpdate: (id: string, field: 'coverageAmount' | 'gapAmount' | 'policyDetails' | 'recommendedAmount' | 'premium', value: string | number) => void;
+  claimedItems?: string[];
+  onClaimToggle?: (id: string) => void;
 }
 
-const CoverageSection: React.FC<CoverageSectionProps> = ({coverage, onToggle, onUpdate}) => {
+const CoverageSection: React.FC<CoverageSectionProps> = ({coverage, onToggle, onUpdate, claimedItems, onClaimToggle}) => {
   // 过滤掉废弃的旧版保障项
   const visibleCoverage = coverage.filter(item => !DEPRECATED_COVERAGE_IDS.includes(item.id));
+  const claimedSet = new Set(claimedItems || []);
 
   if (visibleCoverage.length === 0) {
     return (
@@ -34,6 +37,8 @@ const CoverageSection: React.FC<CoverageSectionProps> = ({coverage, onToggle, on
           coverage={item}
           onToggle={() => onToggle(item.id)}
           onAmountChange={field => (value: string) => onUpdate(item.id, field, value)}
+          isClaimed={claimedSet.has(item.id)}
+          onClaimToggle={onClaimToggle ? () => onClaimToggle(item.id) : undefined}
         />
       ))}
     </View>

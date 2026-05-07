@@ -236,7 +236,7 @@ export const INSURANCE_COVERAGES: InsuranceCoverageConfig[] = [
     fullLabel: '学平险',
     color: '#00CEC9',
     icon: 'account-group',
-    description: '学生平安险，低价高保障',
+    description: '学生综合保障险，低价高保障',
     defaultAmount: 10,
     unit: '万',
     applicableRoles: ['son', 'daughter'],

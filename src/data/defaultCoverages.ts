@@ -1,5 +1,5 @@
 // src/data/defaultCoverages.ts
-// 默认保障配置 - 18项（已移除质子重离子）
+// 默认保障配置 - 20项
 
 import {CoverageConfig} from '../types';
 
@@ -7,7 +7,7 @@ export const DEFAULT_COVERAGES: CoverageConfig[] = [
   // ========== 社保类 ==========
   {
     id: 'socialInsurance',
-    label: '社保医保',
+    label: '基础社保',
     shortLabel: '社',
     category: 'medical',
     icon: '🏥',
@@ -188,6 +188,17 @@ export const DEFAULT_COVERAGES: CoverageConfig[] = [
     recommendedAmount: 50,
     isDefault: true,
     sortOrder: 16,
+  },
+  {
+    id: 'wealthTransfer',
+    label: '财富传承',
+    shortLabel: '传',
+    category: 'life',
+    icon: '💎',
+    color: '#4A90D9',
+    recommendedAmount: 100,
+    isDefault: true,
+    sortOrder: 17,
   },
   {
     id: 'waiver',

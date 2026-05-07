@@ -502,7 +502,7 @@ const FamilyCustomChart: React.FC<FamilyCustomChartProps> = ({
   const {updateMember, addMember} = useFamily();
   
   // 从设置中获取动态保障和权益配置
-  const {customCoverages, customRights} = useSettings();
+  const {state: {customCoverages, customRights}} = useSettings();
   const coverages = Array.isArray(customCoverages) && customCoverages.length > 0 ? customCoverages : DEFAULT_COVERAGES;
   const rights = Array.isArray(customRights) && customRights.length > 0 ? customRights : DEFAULT_RIGHTS;
 
@@ -522,6 +522,16 @@ const FamilyCustomChart: React.FC<FamilyCustomChartProps> = ({
         return;
       }
 
+      // 同步 claimedItems 数组
+      let updatedClaimedItems = [...(member.claimedItems || [])];
+      if (status === 'claimed') {
+        if (!updatedClaimedItems.includes(type)) {
+          updatedClaimedItems.push(type);
+        }
+      } else {
+        updatedClaimedItems = updatedClaimedItems.filter(item => item !== type);
+      }
+
       // 更新 coverage 或 rights 数组
       const isCoverageType = coverages.some(c => c.id === type);
       
@@ -530,12 +540,10 @@ const FamilyCustomChart: React.FC<FamilyCustomChartProps> = ({
         let updatedCoverage: typeof member.coverage;
         
         if (existingCoverage) {
-          // 如果保障项已存在，更新状态
           updatedCoverage = member.coverage.map(c =>
             c.id === type ? { ...c, hasCoverage: status !== 'none' } : c
           );
         } else if (status !== 'none') {
-          // 如果保障项不存在且状态不是"无"，先添加再设置状态
           updatedCoverage = [
             ...member.coverage,
             { id: type, hasCoverage: true }
@@ -543,18 +551,16 @@ const FamilyCustomChart: React.FC<FamilyCustomChartProps> = ({
         } else {
           updatedCoverage = member.coverage;
         }
-        updateMember(family.id, {...member, coverage: updatedCoverage});
+        updateMember(family.id, {...member, coverage: updatedCoverage, claimedItems: updatedClaimedItems});
       } else {
         const existingRight = member.rights?.find(r => r.id === type);
         let updatedRights: typeof member.rights;
         
         if (existingRight) {
-          // 如果权益项已存在，更新状态
           updatedRights = member.rights?.map(r =>
             r.id === type ? { ...r, hasRight: status !== 'none' } : r
           ) ?? [];
         } else if (status !== 'none') {
-          // 如果权益项不存在且状态不是"无"，先添加再设置状态
           updatedRights = [
             ...(member.rights ?? []),
             { id: type, hasRight: true }
@@ -562,10 +568,10 @@ const FamilyCustomChart: React.FC<FamilyCustomChartProps> = ({
         } else {
           updatedRights = member.rights ?? [];
         }
-        updateMember(family.id, {...member, rights: updatedRights});
+        updateMember(family.id, {...member, rights: updatedRights, claimedItems: updatedClaimedItems});
       }
     },
-    [family, updateMember]
+    [family, coverages, updateMember]
   );
 
   const handleAddMember = useCallback(

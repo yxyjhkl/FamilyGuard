@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   aiConfig: '@family_guard_ai_config',
   analysisHistory: '@family_guard_analysis_history',
   speechHistory: '@family_guard_speech_history',
+  customSpeeches: '@family_guard_custom_speeches',  // 自定义话术
 } as const;
 
 class StorageService {
@@ -120,6 +121,34 @@ class StorageService {
     }
   }
 
+  // ========== 自定义话术 ==========
+  async getCustomSpeeches(): Promise<string | null> {
+    try {
+      return await AsyncStorage.getItem(STORAGE_KEYS.customSpeeches);
+    } catch (error) {
+      logger.error(MODULE, '读取自定义话术失败', error);
+      return null;
+    }
+  }
+
+  async saveCustomSpeeches(speeches: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.customSpeeches, speeches);
+    } catch (error) {
+      logger.error(MODULE, '保存自定义话术失败', error);
+      throw error;
+    }
+  }
+
+  async clearCustomSpeeches(): Promise<void> {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEYS.customSpeeches);
+    } catch (error) {
+      logger.error(MODULE, '清除自定义话术失败', error);
+      throw error;
+    }
+  }
+
   // ========== 清空所有数据 ==========
   async clearAll(): Promise<void> {
     try {
@@ -129,6 +158,7 @@ class StorageService {
         STORAGE_KEYS.aiConfig,
         STORAGE_KEYS.analysisHistory,
         STORAGE_KEYS.speechHistory,
+        STORAGE_KEYS.customSpeeches,
       ]);
     } catch (error) {
       logger.error(MODULE, '清除数据失败', error);

@@ -1,5 +1,8 @@
 // src/types/index.ts - 核心类型定义
 
+// ========== 分析模式类型 ==========
+export type AnalysisMode = 'professional' | 'quick';
+
 // 家庭成员角色
 export type MemberRole = 
   // 核心成员
@@ -147,6 +150,7 @@ export interface Member {
   role: MemberRole;
   name: string;
   age: number;
+  annualIncome?: number;  // 年收入（万元），用于精细版分析
   coverage: MemberCoverage[];
   rights: MemberRight[];
   notes?: string;
@@ -214,14 +218,15 @@ export interface FamilyTemplate {
 
 export type RootStackParamList = {
   Home: undefined;
-  FamilySelect: undefined;
-  MemberList: {familyId: string};
+  FamilySelect: {mode?: AnalysisMode};  // mode: 精细版/快速版
+  MemberList: {familyId: string; mode?: AnalysisMode};
   MemberDetail: {familyId: string; memberId: string};
-  ExportPreview: {familyId: string};
-  MemberDetailExport: {familyId: string; memberId: string};
-  AIAnalysis: {familyId: string};
+  ExportPreview: {familyId: string; mode?: AnalysisMode};
+  MemberDetailExport: {familyId: string; memberId: string; mode?: AnalysisMode};
+  AIAnalysis: {familyId: string; mode?: AnalysisMode};  // mode: 精细版/快速版
   Help: undefined;
   Settings: undefined;
+  SpeechManagement: undefined;  // 话术管理
 };
 
 // ========== 保障配置相关常量 ==========

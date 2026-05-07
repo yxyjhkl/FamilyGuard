@@ -9,6 +9,22 @@ import {maskName, maskPhone} from '../../utils/privacyUtils';
 import CoverageChart from './CoverageChart';
 import RightsSummary from './RightsSummary';
 
+// 过滤Markdown格式符号
+const stripMarkdown = (text: string): string => {
+  if (!text) return '';
+  return text
+    .replace(/#{1,6}\s+/g, '')        // 移除 ## 标题符号
+    .replace(/\*\*(.+?)\*\*/g, '$1')   // 移除 **加粗**
+    .replace(/\*(.+?)\*/g, '$1')       // 移除 *斜体*
+    .replace(/`(.+?)`/g, '$1')         // 移除 `行内代码`
+    .replace(/```[\s\S]*?```/g, '')    // 移除代码块
+    .replace(/^\s*[-*+]\s+/gm, '')     // 移除列表符号
+    .replace(/^\s*\d+\.\s+/gm, '')    // 移除有序列表
+    .replace(/^\s*>\s+/gm, '')        // 移除引用符号
+    .replace(/\n{3,}/g, '\n\n')       // 压缩多余换行
+    .trim();
+};
+
 interface ExportCardProps {
   family: Family;
   motto: string;
@@ -48,7 +64,15 @@ const ExportCard: React.FC<ExportCardProps> = ({
       </View>
 
       {/* 成员保障总览 */}
-      {family.members.map(member => (
+      {family.members.map(member => {
+        // 成人不显示教育金、学平险
+        const isChild = ['son', 'daughter'].includes(member.role);
+        const childSpecificIds = ['education', 'schoolAccident'];
+        const filteredCoverage = isChild
+          ? (member.coverage || [])
+          : (member.coverage || []).filter(c => !childSpecificIds.includes(c.id));
+
+        return (
         <View key={member.id} style={styles.memberSection}>
           <View style={styles.memberHeader}>
             <Text style={styles.memberName}>
@@ -58,10 +82,11 @@ const ExportCard: React.FC<ExportCardProps> = ({
               {MEMBER_ROLE_LABELS[member.role]} | {member.age}岁
             </Text>
           </View>
-          <CoverageChart coverage={member.coverage} showName={showName} />
+          <CoverageChart coverage={filteredCoverage} showName={showName} />
           <RightsSummary rights={member.rights} />
         </View>
-      ))}
+        );
+      })}
 
       {/* AI智能总结 */}
       {aiSummary ? (
@@ -70,7 +95,7 @@ const ExportCard: React.FC<ExportCardProps> = ({
             <Text style={styles.aiSummaryIcon}>🤖</Text>
             <Text style={styles.aiSummaryLabel}>AI智能总结</Text>
           </View>
-          <Text style={styles.aiSummaryText}>{aiSummary}</Text>
+          <Text style={styles.aiSummaryText}>{stripMarkdown(aiSummary)}</Text>
         </View>
       ) : null}
 
@@ -188,6 +213,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.text[1],
     lineHeight: 20,
+    maxHeight: 200, // 允许最多显示约10行
   },
   footer: {
     padding: spacing.lg,

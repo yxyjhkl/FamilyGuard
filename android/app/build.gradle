@@ -2,7 +2,7 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
 def jscFlavor = 'org.webkit:android-jsc:+'
 
 android {
@@ -83,6 +83,9 @@ dependencies {
 
     // react-native-async-storage
     implementation(project(":react-native-async-storage_async-storage"))
+
+    // react-native-clipboard
+    implementation(project(":react-native-clipboard_clipboard"))
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

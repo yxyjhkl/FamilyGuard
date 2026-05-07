@@ -30,7 +30,11 @@ const STATUS_CONFIG = {
 };
 
 const StatusBadge: React.FC<StatusBadgeProps> = ({status, text}) => {
-  const config = STATUS_CONFIG[status];
+  // 确保 status 是有效的值
+  const validStatus = (status === 'sufficient' || status === 'partial' || status === 'missing') 
+    ? status 
+    : 'missing';
+  const config = STATUS_CONFIG[validStatus];
 
   return (
     <View style={[styles.badge, {backgroundColor: config.bgColor}]}>

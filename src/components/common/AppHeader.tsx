@@ -6,12 +6,13 @@ import {colors, typography, spacing, borderRadius} from '../../theme';
 
 interface AppHeaderProps {
   title: string;
+  subtitle?: string;
   showBack?: boolean;
   rightAction?: React.ReactNode;
   onBack?: () => void;
 }
 
-const AppHeader: React.FC<AppHeaderProps> = ({title, showBack = true, rightAction, onBack}) => {
+const AppHeader: React.FC<AppHeaderProps> = ({title, subtitle, showBack = true, rightAction, onBack}) => {
   const navigation = useNavigation();
 
   const handleBack = () => {
@@ -31,9 +32,16 @@ const AppHeader: React.FC<AppHeaderProps> = ({title, showBack = true, rightActio
           </TouchableOpacity>
         )}
       </View>
-      <Text style={styles.title} numberOfLines={1}>
-        {title}
-      </Text>
+      <View style={styles.titleArea}>
+        <Text style={styles.title} numberOfLines={1}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
       <View style={styles.rightSection}>{rightAction}</View>
     </View>
   );
@@ -71,11 +79,20 @@ const styles = StyleSheet.create({
     color: colors.primary[1],
     fontWeight: '600',
   },
+  titleArea: {
+    flex: 1,
+    alignItems: 'center',
+  },
   title: {
     ...typography.subheading,
     color: colors.text[0],
-    flex: 1,
     textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.primary[1],
+    marginTop: 2,
   },
 });
 

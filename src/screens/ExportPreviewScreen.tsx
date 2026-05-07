@@ -27,7 +27,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ExportPreview'>;
 type ExportStyle = 'list' | 'orgChart';
 
 const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
-  const {familyId} = route.params;
+  const {familyId, mode} = route.params;
   const {getFamilyById, updateExportSettings} = useFamily();
   const {startExport, finishExport} = useExport();
   const viewShotRef = useRef<ViewShot>(null);
@@ -59,9 +59,10 @@ const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
       navigation.navigate('MemberDetailExport', {
         familyId,
         memberId: member.id,
+        mode,
       });
     },
-    [navigation, familyId]
+    [navigation, familyId, mode]
   );
 
   // 保存到相册
@@ -217,6 +218,7 @@ const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
                 agentPhone={family.exportSettings.agentPhone}
                 onMemberPress={handleMemberPress}
                 aiSummary={family.exportSettings.aiSummary}
+                mode={mode}
               />
             ) : (
               <ExportCard
@@ -249,7 +251,7 @@ const ExportPreviewScreen: React.FC<Props> = ({route, navigation}) => {
         {/* AI智能分析按钮 */}
         <TouchableOpacity
           style={styles.aiButton}
-          onPress={() => navigation.navigate('AIAnalysis', { familyId })}
+          onPress={() => navigation.navigate('AIAnalysis', { familyId, mode })}
           activeOpacity={0.8}>
           <Text style={styles.aiButtonIcon}>🤖</Text>
           <Text style={styles.aiButtonText}>AI分析</Text>

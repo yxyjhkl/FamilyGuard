@@ -2,22 +2,28 @@
 import React from 'react';
 import {View, Text, StyleSheet, TouchableOpacity} from 'react-native';
 import {colors, typography, spacing, borderRadius} from '../../theme';
-import type {Member} from '../../types';
+import type {Member, AnalysisMode} from '../../types';
 import {MEMBER_ROLE_LABELS} from '../../types';
 import RoleAvatar from '../common/RoleAvatar';
 import StatusBadge from '../common/StatusBadge';
 import {getCoverageStatusColor} from '../../utils/colorUtils';
+import {QUICK_COVERAGES} from '../../data/quickCoverages';
 
 interface MemberRowProps {
   member: Member;
   onPress: (member: Member) => void;
+  mode?: AnalysisMode;
 }
 
-const MemberRow: React.FC<MemberRowProps> = ({member, onPress}) => {
-  const totalCoverage = member.coverage.length;
-  const coveredCount = member.coverage.filter(c => c.hasCoverage).length;
-  const missingCount = member.coverage.filter(c => !c.hasCoverage).length;
-  const partialCount = member.coverage.filter(
+const MemberRow: React.FC<MemberRowProps> = ({member, onPress, mode}) => {
+  const quickCoverageIds = QUICK_COVERAGES.map(c => c.id);
+  const effectiveCoverage = mode === 'quick'
+    ? member.coverage.filter(c => quickCoverageIds.includes(c.id))
+    : member.coverage;
+  const totalCoverage = effectiveCoverage.length;
+  const coveredCount = effectiveCoverage.filter(c => c.hasCoverage).length;
+  const missingCount = effectiveCoverage.filter(c => !c.hasCoverage).length;
+  const partialCount = effectiveCoverage.filter(
     c => c.hasCoverage && (c.gapAmount ?? 0) > 0,
   ).length;
 

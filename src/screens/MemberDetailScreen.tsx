@@ -30,6 +30,8 @@ const MemberDetailScreen: React.FC<Props> = ({route, navigation}) => {
   const [ageInput, setAgeInput] = useState('');
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
+  const [editingIncome, setEditingIncome] = useState(false);
+  const [incomeInput, setIncomeInput] = useState('');
 
   const member = useMemo(
     () => family?.members.find(m => m.id === memberId) ?? null,
@@ -107,6 +109,29 @@ const MemberDetailScreen: React.FC<Props> = ({route, navigation}) => {
     setEditingName(false);
   }, [nameInput, localMember, familyId, updateMember]);
 
+  // 编辑年收入
+  const startEditingIncome = useCallback(() => {
+    if (localMember) {
+      setIncomeInput(localMember.annualIncome ? String(localMember.annualIncome) : '');
+      setEditingIncome(true);
+    }
+  }, [localMember]);
+
+  const saveIncome = useCallback(() => {
+    const newIncome = parseFloat(incomeInput);
+    if (!isNaN(newIncome) && newIncome >= 0 && localMember) {
+      const updatedMember: Member = {...localMember, annualIncome: newIncome};
+      setLocalMember(updatedMember);
+      updateMember(familyId, updatedMember);
+    } else if (incomeInput === '' && localMember) {
+      // 允许清空收入
+      const updatedMember: Member = {...localMember, annualIncome: undefined};
+      setLocalMember(updatedMember);
+      updateMember(familyId, updatedMember);
+    }
+    setEditingIncome(false);
+  }, [incomeInput, localMember, familyId, updateMember]);
+
   const toggleCoverage = useCallback((id: string) => {
     setLocalMember(prev => {
       if (!prev) return prev;
@@ -151,7 +176,12 @@ const MemberDetailScreen: React.FC<Props> = ({route, navigation}) => {
             item.gapAmount = numericValue;
             break;
           case 'premium':
-            item.premium = numericValue;
+            // 保留原始字符串（支持小数点输入过程）
+            if (value === '' || value === '.') {
+              item.premium = undefined;
+            } else {
+              item.premium = numericValue;
+            }
             break;
           case 'policyDetails':
             item.policyDetails = typeof value === 'string' ? value : String(value);
@@ -164,6 +194,21 @@ const MemberDetailScreen: React.FC<Props> = ({route, navigation}) => {
     },
     [],
   );
+
+  // 切换保障项的已理赔状态（长按触发）
+  const toggleClaimed = useCallback((id: string) => {
+    setLocalMember(prev => {
+      if (!prev) return prev;
+      const currentClaimed = prev.claimedItems || [];
+      if (currentClaimed.includes(id)) {
+        // 取消理赔
+        return {...prev, claimedItems: currentClaimed.filter(c => c !== id)};
+      } else {
+        // 标记为已理赔
+        return {...prev, claimedItems: [...currentClaimed, id]};
+      }
+    });
+  }, []);
 
   const toggleRight = useCallback((id: string) => {
     setLocalMember(prev => {
@@ -325,11 +370,45 @@ const MemberDetailScreen: React.FC<Props> = ({route, navigation}) => {
 
       {/* 内容 */}
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* 年收入编辑区域 */}
+        <View style={styles.incomeCard}>
+          <View style={styles.incomeRow}>
+            <Text style={styles.incomeLabel}>💰 年收入</Text>
+            {editingIncome ? (
+              <View style={styles.incomeEditRow}>
+                <TextInput
+                  style={styles.incomeInput}
+                  value={incomeInput}
+                  onChangeText={setIncomeInput}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                  placeholder="请输入"
+                  placeholderTextColor={colors.text[1]}
+                  onBlur={saveIncome}
+                  onSubmitEditing={saveIncome}
+                  maxLength={10}
+                />
+                <Text style={styles.incomeUnit}>万/年</Text>
+              </View>
+            ) : (
+              <TouchableOpacity onPress={startEditingIncome} activeOpacity={0.7}>
+                <Text style={styles.incomeValue}>
+                  {member.annualIncome ? `${member.annualIncome} 万/年` : '点击设置'}
+                  <Text style={styles.editHint}> (点击修改)</Text>
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <Text style={styles.incomeHint}>用于保障检视评分（影响重疾险等建议额度）</Text>
+        </View>
+
         {activeTab === 'coverage' ? (
           <CoverageSection
             coverage={localMember.coverage}
             onToggle={toggleCoverage}
             onUpdate={updateCoverageField}
+            claimedItems={localMember.claimedItems}
+            onClaimToggle={toggleClaimed}
           />
         ) : (
           <RightsGrid
@@ -472,7 +551,56 @@ const styles = StyleSheet.create({
   },
   editHint: {
     fontSize: 11,
+    color: colors.text[2],
+  },
+  incomeCard: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+    backgroundColor: colors.functional.warningLight || '#FFF8E1',
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.functional.warning + '40' || '#FFE082',
+  },
+  incomeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  incomeLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text[0],
+  },
+  incomeValue: {
+    fontSize: 15,
+    color: colors.functional.warning || '#F57C00',
+    fontWeight: '600',
+  },
+  incomeEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  incomeInput: {
+    fontSize: 15,
+    color: colors.primary[1],
+    fontWeight: '600',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.primary[1],
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 0,
+    minWidth: 60,
+    textAlign: 'right',
+  },
+  incomeUnit: {
+    fontSize: 13,
+    color: colors.text[2],
+    marginLeft: spacing.xs,
+  },
+  incomeHint: {
+    fontSize: 11,
     color: colors.text[3],
+    marginTop: spacing.xs,
   },
   tabRow: {
     flexDirection: 'row',

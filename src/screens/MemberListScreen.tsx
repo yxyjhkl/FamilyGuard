@@ -10,6 +10,7 @@ import EmptyState from '../components/common/EmptyState';
 import FamilyTreeGraph from '../components/family/FamilyTreeGraph';
 import FamilyOrganizationChart from '../components/family/FamilyOrganizationChart';
 import FamilyCustomChart from '../components/family/FamilyCustomChart';
+import {QUICK_COVERAGES} from '../data/quickCoverages';
 import {colors, typography, spacing, borderRadius} from '../theme';
 
 // 帮助按钮组件
@@ -23,7 +24,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'MemberList'>;
 type ViewMode = 'list' | 'graph' | 'orgChart' | 'custom';
 
 const MemberListScreen: React.FC<Props> = ({route, navigation}) => {
-  const {familyId} = route.params;
+  const {familyId, mode} = route.params;
   const {getFamilyById} = useFamily();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
 
@@ -41,9 +42,9 @@ const MemberListScreen: React.FC<Props> = ({route, navigation}) => {
 
   const renderMember = useCallback(
     ({item}: {item: Member}) => (
-      <MemberRow member={item} onPress={handleMemberPress} />
+      <MemberRow member={item} onPress={handleMemberPress} mode={mode} />
     ),
-    [handleMemberPress],
+    [handleMemberPress, mode],
   );
 
   if (!family) {
@@ -55,14 +56,18 @@ const MemberListScreen: React.FC<Props> = ({route, navigation}) => {
     );
   }
 
-  const coveredCount = family.members.reduce(
-    (sum, m) => sum + m.coverage.filter(c => c.hasCoverage).length,
-    0,
-  );
-  const totalCount = family.members.reduce(
-    (sum, m) => sum + m.coverage.length,
-    0,
-  );
+  const quickCoverageIds = QUICK_COVERAGES.map(c => c.id);
+
+  const coveredCount = family.members.reduce((sum, m) => {
+    const effective = mode === 'quick'
+      ? m.coverage.filter(c => quickCoverageIds.includes(c.id))
+      : m.coverage;
+    return sum + effective.filter(c => c.hasCoverage).length;
+  }, 0);
+
+  const totalCount = family.members.reduce((sum, m) => {
+    return sum + (mode === 'quick' ? quickCoverageIds.length : m.coverage.length);
+  }, 0);
 
   return (
     <View style={styles.container}>
@@ -169,8 +174,17 @@ const MemberListScreen: React.FC<Props> = ({route, navigation}) => {
       {/* 底部操作 */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
+          style={styles.aiButton}
+          onPress={() => navigation.navigate('AIAnalysis', {familyId, mode})}
+          activeOpacity={0.85}>
+          <Text style={styles.aiButtonIcon}>🤖</Text>
+          <Text style={styles.aiButtonText}>
+            AI智能分析
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           style={styles.exportButton}
-          onPress={() => navigation.navigate('ExportPreview', {familyId})}
+          onPress={() => navigation.navigate('ExportPreview', {familyId, mode})}
           activeOpacity={0.85}>
           <Text style={styles.exportButtonText}>生成保障检视图</Text>
         </TouchableOpacity>
@@ -270,6 +284,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bottomBar: {
+    flexDirection: 'row',
+    gap: spacing.md,
     position: 'absolute',
     bottom: 0,
     left: 0,
@@ -281,7 +297,32 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.card.border,
   },
+  aiButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.functional.aiBlue || '#667eea',
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    elevation: 3,
+    shadowColor: colors.functional.aiBlue || '#667eea',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  aiButtonIcon: {
+    fontSize: 18,
+    marginRight: spacing.xs,
+  },
+  aiButtonText: {
+    ...typography.body,
+    color: colors.text[3],
+    fontWeight: '600',
+    fontSize: 15,
+  },
   exportButton: {
+    flex: 1.5,
     backgroundColor: colors.primary[1],
     paddingVertical: spacing.md,
     borderRadius: borderRadius.md,

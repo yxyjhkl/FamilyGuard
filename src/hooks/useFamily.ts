@@ -2,8 +2,9 @@
 import {useCallback} from 'react';
 import {useFamily as useFamilyStore} from '../store/familyStore';
 import {useSettings} from '../store/settingsStore';
-import type {Family, Member, FamilyStructureType} from '../types';
+import type {Family, Member, FamilyStructureType, AnalysisMode} from '../types';
 import {generateUUID} from '../utils/formatUtils';
+import {QUICK_COVERAGES} from '../data/quickCoverages';
 
 export function useFamily() {
   const ctx = useFamilyStore();
@@ -21,9 +22,17 @@ export function useFamily() {
       structureType: FamilyStructureType,
       structureLabel: string,
       templateMembers: {role: Member['role']; defaultName: string; defaultAge: number}[],
+      mode: AnalysisMode = 'professional',
     ): Promise<string> => {
       const activeCoverages = getActiveCoverages();
       const activeRights = getActiveRights();
+      const quickIds = QUICK_COVERAGES.map(c => c.id);
+
+      // 快速版只取8项，精细版取全部
+      const effectiveCoverages = activeCoverages.filter(co => {
+        if (!co.isDefault) return false;
+        return mode === 'quick' ? quickIds.includes(co.id) : true;
+      });
 
       const members: Member[] = templateMembers.map(tm => ({
         id: generateUUID(),
@@ -31,21 +40,20 @@ export function useFamily() {
         role: tm.role,
         name: tm.defaultName,
         age: tm.defaultAge,
-        // 使用动态保障配置
-        coverage: activeCoverages
-          .filter(co => co.isDefault) // 默认项都添加
-          .map(co => {
-            // 使用全局设置的建议保额
-            const recommended = co.recommendedAmount;
-            return {
-              id: co.id,
-              hasCoverage: false,
-              coverageAmount: 0,
-              recommendedAmount: recommended,
-              gapAmount: recommended,
-              policyDetails: '',
-            };
-          }),
+        // 根据 mode 动态初始化保障配置
+        coverage: effectiveCoverages.map(co => {
+          // 使用全局设置的建议保额
+          const recommended = co.recommendedAmount;
+          return {
+            id: co.id,
+            hasCoverage: false,
+            coverageAmount: 0,
+            premium: undefined, // 年缴保费
+            recommendedAmount: recommended,
+            gapAmount: recommended,
+            policyDetails: '',
+          };
+        }),
         // 使用动态权益配置
         rights: activeRights.map(r => ({
           id: r.id,

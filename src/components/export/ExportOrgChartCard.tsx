@@ -11,7 +11,8 @@ import {maskName} from '../../utils/privacyUtils';
 import {useSettings} from '../../store/settingsStore';
 import {DEFAULT_COVERAGES} from '../../data/defaultCoverages';
 import {DEFAULT_RIGHTS} from '../../data/defaultRights';
-import type {CoverageConfig, RightConfig} from '../../types';
+import type {CoverageConfig, RightConfig, AnalysisMode} from '../../types';
+import {QUICK_COVERAGES} from '../../data/quickCoverages';
 
 const {width: SCREEN_WIDTH} = Dimensions.get('window');
 
@@ -27,6 +28,22 @@ const STATUS_COLORS = {
   claimed: '#E74C3C',
 };
 
+// 过滤Markdown格式符号
+const stripMarkdown = (text: string): string => {
+  if (!text) return '';
+  return text
+    .replace(/#{1,6}\s+/g, '')        // 移除 ## 标题符号
+    .replace(/\*\*(.+?)\*\*/g, '$1')   // 移除 **加粗**
+    .replace(/\*(.+?)\*/g, '$1')       // 移除 *斜体*
+    .replace(/`(.+?)`/g, '$1')         // 移除 `行内代码`
+    .replace(/```[\s\S]*?```/g, '')    // 移除代码块
+    .replace(/^\s*[-*+]\s+/gm, '')     // 移除列表符号
+    .replace(/^\s*\d+\.\s+/gm, '')    // 移除有序列表
+    .replace(/^\s*>\s+/gm, '')        // 移除引用符号
+    .replace(/\n{3,}/g, '\n\n')       // 压缩多余换行
+    .trim();
+};
+
 // ============================================
 // 性能优化：Memoized 节点组件
 // ============================================
@@ -39,6 +56,7 @@ interface RightsNodeProps {
   nodeSize: number;
   containerSize: number;
   hasRight: boolean;
+  isClaimed?: boolean;
 }
 
 const RightsNode: React.FC<RightsNodeProps> = memo(({
@@ -49,11 +67,14 @@ const RightsNode: React.FC<RightsNodeProps> = memo(({
   nodeSize,
   containerSize,
   hasRight,
+  isClaimed,
 }) => {
   const pos = getPositionOnCircle(index, total, innerRadius);
   const isOwned = hasRight;
 
   // 未拥有的节点不渲染阴影，减少 GPU 负担
+  const bgColor = isClaimed ? STATUS_COLORS.claimed : (isOwned ? right.color : STATUS_COLORS.none);
+  const bdColor = isClaimed ? STATUS_COLORS.claimed : (isOwned ? right.color : '#D0D0D0');
   const nodeStyle = [
     styles.node,
     {
@@ -62,12 +83,12 @@ const RightsNode: React.FC<RightsNodeProps> = memo(({
       width: nodeSize,
       height: nodeSize,
       borderRadius: nodeSize / 2,
-      backgroundColor: isOwned ? right.color : STATUS_COLORS.none,
-      borderColor: isOwned ? right.color : '#D0D0D0',
-      borderWidth: isOwned ? 0 : 1,
+      backgroundColor: bgColor,
+      borderColor: bdColor,
+      borderWidth: isOwned || isClaimed ? 0 : 1,
       zIndex: 2,
       // 未拥有时移除阴影
-      ...(isOwned ? {} : styles.nodeNoShadow),
+      ...(isOwned || isClaimed ? {} : styles.nodeNoShadow),
     },
   ];
 
@@ -76,7 +97,7 @@ const RightsNode: React.FC<RightsNodeProps> = memo(({
 
   return (
     <View key={right.id} style={nodeStyle}>
-      <Text style={[styles.rightDotText, {color: isOwned ? '#fff' : '#888', fontSize}]}>
+      <Text style={[styles.rightDotText, {color: (isOwned || isClaimed) ? '#fff' : '#888', fontSize}]}>
         {right.shortLabel}
       </Text>
     </View>
@@ -91,6 +112,7 @@ interface CoverageNodeProps {
   nodeSize: number;
   containerSize: number;
   hasCoverage: boolean;
+  isClaimed?: boolean;
 }
 
 const CoverageNode: React.FC<CoverageNodeProps> = memo(({
@@ -101,10 +123,13 @@ const CoverageNode: React.FC<CoverageNodeProps> = memo(({
   nodeSize,
   containerSize,
   hasCoverage,
+  isClaimed,
 }) => {
   const pos = getPositionOnCircle(index, total, outerRadius);
   const isOwned = hasCoverage;
 
+  const bgColor = isClaimed ? STATUS_COLORS.claimed : (isOwned ? coverage.color : STATUS_COLORS.none);
+  const bdColor = isClaimed ? STATUS_COLORS.claimed : (isOwned ? coverage.color : '#D0D0D0');
   // 未拥有的节点不渲染阴影
   const nodeStyle = [
     styles.node,
@@ -114,12 +139,12 @@ const CoverageNode: React.FC<CoverageNodeProps> = memo(({
       width: nodeSize,
       height: nodeSize,
       borderRadius: nodeSize / 2,
-      backgroundColor: isOwned ? coverage.color : STATUS_COLORS.none,
-      borderColor: isOwned ? coverage.color : '#D0D0D0',
-      borderWidth: isOwned ? 0 : 1,
+      backgroundColor: bgColor,
+      borderColor: bdColor,
+      borderWidth: isOwned || isClaimed ? 0 : 1,
       zIndex: 1,
       // 未拥有时移除阴影
-      ...(isOwned ? {} : styles.nodeNoShadow),
+      ...(isOwned || isClaimed ? {} : styles.nodeNoShadow),
     },
   ];
 
@@ -128,7 +153,7 @@ const CoverageNode: React.FC<CoverageNodeProps> = memo(({
 
   return (
     <View key={coverage.id} style={nodeStyle}>
-      <Text style={[styles.nodeTextSmall, {color: isOwned ? '#fff' : '#888', fontSize}]}>
+      <Text style={[styles.nodeTextSmall, {color: (isOwned || isClaimed) ? '#fff' : '#888', fontSize}]}>
         {coverage.shortLabel}
       </Text>
     </View>
@@ -149,6 +174,7 @@ interface ExportOrgChartCardProps {
   agentPhone: string;
   onMemberPress?: (member: Member) => void;
   aiSummary?: string;
+  mode?: AnalysisMode;
 }
 
 // 计算角度位置
@@ -215,6 +241,9 @@ const MemberCircle: React.FC<MemberCircleProps> = memo(({
   // 判断是否为男性（男性不显示孕妇保障）
   const isMale = ['father', 'husband', 'son', 'grandfather', 'other'].includes(member.role);
 
+  // 判断是否为子女（仅子女显示教育金、学平险）
+  const isChild = ['son', 'daughter'].includes(member.role);
+
   // Memoize rights lookup map
   const rightsMap = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -228,6 +257,11 @@ const MemberCircle: React.FC<MemberCircleProps> = memo(({
     member.coverage?.forEach(c => map.set(c.id, c.hasCoverage));
     return map;
   }, [member.coverage]);
+
+  // Memoize claimed items set
+  const claimedItemsSet = useMemo(() => {
+    return new Set(member.claimedItems || []);
+  }, [member.claimedItems]);
 
   // Memoize dynamic coverages lookup
   const coverageConfigMap = useMemo(() => {
@@ -243,10 +277,14 @@ const MemberCircle: React.FC<MemberCircleProps> = memo(({
     return map;
   }, [rights]);
 
-  // 根据性别过滤保障项：男性不显示孕妇保障
-  const filteredCoverages = isMale 
+  // 根据性别和角色过滤保障项
+  let filteredCoverages = isMale 
     ? coverages.filter(c => c.id !== 'maternity')
     : coverages;
+  // 成人不显示教育金、学平险
+  if (!isChild) {
+    filteredCoverages = filteredCoverages.filter(c => c.id !== 'education' && c.id !== 'schoolAccident');
+  }
   
   // 紧凑模式下使用前15项保障，避免节点重叠
   const displayCoverages = compactMode
@@ -274,6 +312,7 @@ const MemberCircle: React.FC<MemberCircleProps> = memo(({
             nodeSize={rightsNodeSize}
             containerSize={size}
             hasRight={rightsMap.get(right.id) ?? false}
+            isClaimed={claimedItemsSet.has(right.id)}
           />
         ))}
 
@@ -288,6 +327,7 @@ const MemberCircle: React.FC<MemberCircleProps> = memo(({
             nodeSize={nodeSize}
             containerSize={size}
             hasCoverage={coverageMap.get(coverage.id) ?? false}
+            isClaimed={claimedItemsSet.has(coverage.id)}
           />
         ))}
 
@@ -340,13 +380,15 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
   agentPhone,
   onMemberPress,
   aiSummary,
+  mode,
 }) => {
   // 从设置中获取动态保障和权益配置
-  const {customCoverages, customRights} = useSettings();
+  const {state: {customCoverages, customRights}} = useSettings();
   
-  // 动态保障和权益列表（防御性检查，防止存储数据损坏）
-  // 空数组时回退到默认值兜底
-  const coverages = Array.isArray(customCoverages) && customCoverages.length > 0 ? customCoverages : DEFAULT_COVERAGES;
+  // 根据模式选择对应的保障配置：快速版强制用 QUICK_COVERAGES，精细版用自定义或默认
+  const baseCoverages = mode === 'quick'
+    ? QUICK_COVERAGES
+    : (Array.isArray(customCoverages) && customCoverages.length > 0 ? customCoverages : DEFAULT_COVERAGES);
   const rights = Array.isArray(customRights) && customRights.length > 0 ? customRights : DEFAULT_RIGHTS;
   // 防御性检查，防止 family.members 为 undefined
   const members = Array.isArray(family.members) ? family.members : [];
@@ -399,20 +441,32 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
     
     // 男性角色列表（不计入孕妇保障）
     const maleRoles = ['father', 'husband', 'son', 'grandfather', 'other'];
+    // 子女角色列表（才计入教育金、学平险）
+    const childRoles = ['son', 'daughter'];
+    // 子女人群专属保障ID
+    const childSpecificIds = ['education', 'schoolAccident'];
 
     members.forEach(member => {
-      // 根据性别计算有效保障项数量（男性不含孕妇保障）
       const isMale = maleRoles.includes(member.role);
-      const effectiveCoverageCount = isMale ? coverages.length - 1 : coverages.length;
+      const isChild = childRoles.includes(member.role);
+      
+      // 计算该成员的有效保障项数量
+      let effectiveCoverageCount = baseCoverages.length;
+      if (isMale) effectiveCoverageCount--; // 男性不计孕妇保障
+      if (!isChild) {
+        // 成人不计教育金、学平险
+        effectiveCoverageCount -= baseCoverages.filter(c => childSpecificIds.includes(c.id)).length;
+      }
       totalCoverage += effectiveCoverageCount;
       
-      // 从 member.coverage 数组统计已有保障（剔除男性的孕妇保障）
+      // 从 member.coverage 数组统计已有保障
       member.coverage?.forEach(c => {
         if (c.hasCoverage) {
           // 男性不计入孕妇保障
-          if (!(isMale && c.id === 'maternity')) {
-            ownedCoverage++;
-          }
+          if (isMale && c.id === 'maternity') return;
+          // 成人不计入教育金、学平险
+          if (!isChild && childSpecificIds.includes(c.id)) return;
+          ownedCoverage++;
         }
       });
       // 从 member.rights 数组统计已有权益
@@ -425,7 +479,7 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
       coverageRate: totalCoverage > 0 ? Math.round((ownedCoverage / totalCoverage) * 100) : 0,
       rightsRate: totalRights > 0 ? Math.round((ownedRights / totalRights) * 100) : 0,
     };
-  }, [members, coverages, rights]);
+  }, [members, baseCoverages, rights]);
 
   // 布局类型状态：'single' 竖排单列 | 'double' 双排
   const [layoutType, setLayoutType] = useState<'single' | 'double'>('double');
@@ -451,7 +505,7 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
       mode={mode}
       compactMode={compactMode}
       onPress={onMemberPress}
-      coverages={coverages}
+      coverages={baseCoverages}
       rights={rights}
     />
   );
@@ -579,38 +633,31 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
         {/* 紧凑模式提示 */}
         {compactMode && (
           <View style={styles.compactModeHint}>
-            <Text style={styles.compactModeText}>小屏模式 · 显示{Math.min(15, coverages.length)}项核心保障</Text>
+            <Text style={styles.compactModeText}>小屏模式 · 显示{Math.min(15, baseCoverages.length)}项核心保障</Text>
           </View>
         )}
 
-        {/* 保障项 - 紧凑模式下限制为15项 */}
+        {/* 保障项 - 平铺不分组的紧凑布局 */}
         <View style={styles.legendCategory}>
           <Text style={styles.legendCategoryTitle}>
-            保障({compactMode ? Math.min(15, coverages.length) + '项' : coverages.length + '项'})
+            保障({compactMode ? Math.min(15, baseCoverages.length) : baseCoverages.length}项)
           </Text>
           <View style={styles.legendGrid}>
-            {/* 使用category分组，避免硬编码索引 */}
-            {['life', 'critical', 'accident', 'medical', 'education', 'special', 'other'].map(category => {
-              // 紧凑模式下只取前15项
-              const allItems = coverages.filter(c => c.category === category);
-              const items = compactMode
-                ? allItems.slice(0, Math.ceil(Math.min(15, coverages.length) / 6)) // 均匀分布
-                : allItems;
-              if (items.length === 0) return null;
-
-              return (
-                <View key={category} style={styles.legendGridRow}>
-                  {items.map(c => (
-                    <View key={c.id} style={styles.legendGridItem}>
-                      <View style={[styles.legendDot, {backgroundColor: c.color}]}>
-                        <Text style={styles.legendDotText}>{c.shortLabel}</Text>
-                      </View>
-                      <Text style={styles.legendLabel}>{c.label}</Text>
+            <View style={styles.legendGridRow}>
+              {(() => {
+                const items = compactMode
+                  ? baseCoverages.slice(0, Math.min(15, baseCoverages.length))
+                  : baseCoverages;
+                return items.map(c => (
+                  <View key={c.id} style={styles.legendGridItem}>
+                    <View style={[styles.legendDot, {backgroundColor: c.color}]}>
+                      <Text style={styles.legendDotText}>{c.shortLabel}</Text>
                     </View>
-                  ))}
-                </View>
-              );
-            })}
+                    <Text style={styles.legendLabel} numberOfLines={1}>{c.label}</Text>
+                  </View>
+                ));
+              })()}
+            </View>
           </View>
         </View>
 
@@ -624,7 +671,7 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
                   <View style={[styles.legendDot, {backgroundColor: r.color}]}>
                     <Text style={styles.legendDotText}>{r.shortLabel}</Text>
                   </View>
-                  <Text style={styles.legendLabel}>{r.label}</Text>
+                  <Text style={styles.legendLabel} numberOfLines={1}>{r.label}</Text>
                 </View>
               ))}
             </View>
@@ -639,7 +686,7 @@ const ExportOrgChartCard: React.FC<ExportOrgChartCardProps> = ({
             <Text style={styles.aiSummaryIcon}>🤖</Text>
             <Text style={styles.aiSummaryLabel}>AI智能总结</Text>
           </View>
-          <Text style={styles.aiSummaryText}>{aiSummary}</Text>
+          <Text style={styles.aiSummaryText}>{stripMarkdown(aiSummary)}</Text>
         </View>
       ) : null}
 
@@ -751,81 +798,81 @@ const styles = StyleSheet.create({
     marginHorizontal: 8,
   },
 
-  // 图例
+  // 图例 - 紧凑排版
   legendSection: {
-    padding: 12,
+    padding: 8,
     backgroundColor: colors.background[0],
     borderBottomWidth: 1,
     borderBottomColor: colors.card.border,
   },
   legendHeader: {
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   legendTitle: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
     color: colors.text[1],
   },
   legendStatusRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 16,
-    marginBottom: 12,
-    paddingVertical: 8,
+    gap: 12,
+    marginBottom: 6,
+    paddingVertical: 4,
     backgroundColor: 'rgba(0,0,0,0.02)',
-    borderRadius: 8,
+    borderRadius: 6,
   },
   legendStatusItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
   legendStatusText: {
-    fontSize: 10,
+    fontSize: 9,
     color: colors.text[1],
   },
   legendCategory: {
-    marginBottom: 8,
+    marginBottom: 4,
   },
   legendCategoryTitle: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
     color: colors.text[1],
-    marginBottom: 6,
+    marginBottom: 3,
   },
   compactModeHint: {
     backgroundColor: colors.functional.warning + '20',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
     alignSelf: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   compactModeText: {
-    fontSize: 9,
+    fontSize: 8,
     color: colors.functional.warning,
     fontWeight: '500',
   },
   legendGrid: {
-    gap: 4,
+    gap: 2,
   },
   legendGridRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 4,
   },
   legendGridItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    width: '23%',
+    width: '20%',  // 5列排版（100%/5=20%）
     marginBottom: 1,
   },
   legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -837,6 +884,7 @@ const styles = StyleSheet.create({
   legendLabel: {
     fontSize: 7,
     color: colors.text[2],
+    flexShrink: 1,
   },
   legendItems: {
     flexDirection: 'row',

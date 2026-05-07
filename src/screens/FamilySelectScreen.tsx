@@ -18,7 +18,8 @@ const HelpButton: React.FC<{onPress: () => void}> = ({onPress}) => (
 
 type Props = NativeStackScreenProps<RootStackParamList, 'FamilySelect'>;
 
-const FamilySelectScreen: React.FC<Props> = ({navigation}) => {
+const FamilySelectScreen: React.FC<Props> = ({route, navigation}) => {
+  const mode = route.params?.mode;  // 快速版/精细版
   const {createFamilyFromTemplate} = useFamily();
   const [showNameInput, setShowNameInput] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<FamilyTemplate | null>(null);
@@ -40,8 +41,9 @@ const FamilySelectScreen: React.FC<Props> = ({navigation}) => {
         selectedTemplate.id,
         selectedTemplate.label,
         selectedTemplate.members,
+        mode,
       );
-      navigation.replace('MemberList', {familyId});
+      navigation.replace('MemberList', {familyId, mode});
     } catch (error) {
       Alert.alert('创建失败', '无法创建家庭，请重试');
     }
@@ -51,6 +53,7 @@ const FamilySelectScreen: React.FC<Props> = ({navigation}) => {
     <View style={styles.container}>
       <AppHeader 
         title="选择家庭结构"
+        subtitle={mode === 'professional' ? '精细版' : mode === 'quick' ? '快速版' : undefined}
         rightAction={<HelpButton onPress={() => navigation.navigate('Help')} />}
       />
 

@@ -11,6 +11,7 @@ import MemberDetailExportScreen from '../screens/MemberDetailExportScreen';
 import AIAnalysisScreen from '../screens/AIAnalysisScreen';
 import HelpScreen from '../screens/HelpScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import SpeechManagementScreen from '../screens/SpeechManagementScreen';
 import {colors} from '../theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -41,6 +42,14 @@ const AppNavigator: React.FC = () => {
       <Stack.Screen 
         name="Settings" 
         component={SettingsScreen}
+        options={{
+          presentation: 'modal',
+          animation: 'slide_from_bottom',
+        }} 
+      />
+      <Stack.Screen 
+        name="SpeechManagement" 
+        component={SpeechManagementScreen}
         options={{
           presentation: 'modal',
           animation: 'slide_from_bottom',

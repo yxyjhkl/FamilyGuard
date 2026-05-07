@@ -12,13 +12,16 @@ interface CoverageItemProps {
   coverage: MemberCoverage;
   onToggle: () => void;
   onAmountChange: (field: 'coverageAmount' | 'gapAmount' | 'policyDetails' | 'recommendedAmount' | 'premium') => (value: string) => void;
-  onRecommendedAmountChange?: (amount: number) => void; // 建议保额变化回调
+  onRecommendedAmountChange?: (amount: number) => void;
+  isClaimed?: boolean;
+  onClaimToggle?: () => void;
 }
 
-const CoverageItem: React.FC<CoverageItemProps> = ({coverage, onToggle, onAmountChange, onRecommendedAmountChange}) => {
+const CoverageItem: React.FC<CoverageItemProps> = ({coverage, onToggle, onAmountChange, onRecommendedAmountChange, isClaimed, onClaimToggle}) => {
   const [expanded, setExpanded] = useState(false);
   const [editingRecommended, setEditingRecommended] = useState(false);
   const [recommendedInput, setRecommendedInput] = useState('');
+  const [premiumInput, setPremiumInput] = useState(''); // 保费输入状态，支持小数点
   const {getCoverageConfig} = useSettings();
 
   // 获取保障配置
@@ -26,13 +29,22 @@ const CoverageItem: React.FC<CoverageItemProps> = ({coverage, onToggle, onAmount
     return getCoverageConfig(coverage.id);
   }, [coverage.id, getCoverageConfig]);
 
-  const label = config?.label || coverage.id;
-  const shortLabel = config?.shortLabel || '定';
-  const color = config?.color || colors.primary[1];
+  // 安全获取显示标签
+  const label = config?.label ?? coverage.id ?? '未知保障';
+  const shortLabel = config?.shortLabel ?? '?';
+  const color = config?.color ?? colors.primary[1];
+
+  // 安全获取保额值
+  const coverageAmount = typeof coverage.coverageAmount === 'number' ? coverage.coverageAmount : 0;
+  const premium = typeof coverage.premium === 'number' ? coverage.premium : undefined;
+  const recommendedAmount = typeof coverage.recommendedAmount === 'number' ? coverage.recommendedAmount : 0;
+  const gapAmount = typeof coverage.gapAmount === 'number' ? coverage.gapAmount : 0;
+  const hasCoverage = coverage.hasCoverage === true;
+  const policyDetails = coverage.policyDetails ?? '';
 
   // 开始编辑建议保额
   const startEditRecommended = () => {
-    setRecommendedInput(String(coverage.recommendedAmount ?? 0));
+    setRecommendedInput(String(recommendedAmount));
     setEditingRecommended(true);
   };
 
@@ -44,9 +56,7 @@ const CoverageItem: React.FC<CoverageItemProps> = ({coverage, onToggle, onAmount
       return;
     }
     onAmountChange('recommendedAmount')(String(result.value));
-    // 同时更新缺口
-    const currentCoverage = coverage.coverageAmount ?? 0;
-    onAmountChange('gapAmount')(String(Math.max(0, result.value - currentCoverage)));
+    onAmountChange('gapAmount')(String(Math.max(0, result.value - coverageAmount)));
     if (onRecommendedAmountChange) {
       onRecommendedAmountChange(result.value);
     }
@@ -58,6 +68,15 @@ const CoverageItem: React.FC<CoverageItemProps> = ({coverage, onToggle, onAmount
     setEditingRecommended(false);
     setRecommendedInput('');
   };
+
+  // 计算状态
+  const status = !hasCoverage ? 'missing' : gapAmount > 0 ? 'partial' : 'sufficient';
+  const statusText = getCoverageStatusText(hasCoverage, gapAmount);
+
+  // 计算保障效率
+  const efficiency = hasCoverage && premium && premium > 0 
+    ? Math.round((coverageAmount / premium) * 10) / 10 
+    : null;
 
   return (
     <View style={styles.container}>
@@ -74,81 +93,76 @@ const CoverageItem: React.FC<CoverageItemProps> = ({coverage, onToggle, onAmount
           </View>
           <View style={styles.titleArea}>
             <Text style={styles.title}>{label}</Text>
-            {coverage.hasCoverage && (
-              <Text style={styles.amount}>{Number(coverage.coverageAmount) || 0}万</Text>
+            {hasCoverage && (
+              <Text style={styles.amount}>{coverageAmount}万</Text>
             )}
           </View>
         </View>
         <View style={styles.rightSection}>
-          <StatusBadge
-            status={
-              !coverage.hasCoverage
-                ? 'missing'
-                : (coverage.gapAmount ?? 0) > 0
-                ? 'partial'
-                : 'sufficient'
-            }
-            text={getCoverageStatusText(coverage.hasCoverage, coverage.gapAmount)}
-          />
+          <StatusBadge status={status} text={statusText} />
           <TouchableOpacity
             style={[
               styles.toggleButton,
-              {backgroundColor: coverage.hasCoverage ? color : colors.card.border},
+              {backgroundColor: isClaimed ? colors.functional.danger : (hasCoverage ? color : colors.card.border)},
             ]}
             onPress={onToggle}
+            onLongPress={hasCoverage ? onClaimToggle : undefined}
             activeOpacity={0.7}>
-            <Text style={styles.toggleText}>
-              {coverage.hasCoverage ? '有' : '无'}
+            <Text style={[styles.toggleText, isClaimed && {color: '#FFF', fontWeight: '700'}]}>
+              {isClaimed ? '赔' : hasCoverage ? '有' : '无'}
             </Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
 
       {/* 展开详情 */}
-      {expanded && (
+      {expanded ? (
         <View style={styles.details}>
-          {coverage.hasCoverage && (
+          {hasCoverage ? (
             <>
+              {/* 已有保额 */}
               <View style={styles.inputRow}>
                 <Text style={styles.inputLabel}>已有保额（万）</Text>
                 <TextInput
                   style={styles.input}
                   keyboardType="decimal-pad"
-                  value={String(coverage.coverageAmount ?? '')}
-                  onChangeText={(text) => {
-                    // 允许输入过程和删除（空字符串/小数点）
-                    if (text === '' || text === '.' || text.endsWith('.')) {
-                      onAmountChange('coverageAmount')(text);
-                      return;
-                    }
-                    const result = validateAmount(text, 10000);
-                    onAmountChange('coverageAmount')(String(result.value));
-                  }}
+                  value={String(coverageAmount)}
+                  onChangeText={(text) => onAmountChange('coverageAmount')(text)}
                   placeholder="请输入"
                   placeholderTextColor={colors.text[2]}
                 />
               </View>
 
+              {/* 年缴保费 */}
               <View style={styles.inputRow}>
                 <Text style={styles.inputLabel}>年缴保费（万）</Text>
                 <TextInput
                   style={styles.input}
                   keyboardType="decimal-pad"
-                  value={String(coverage.premium ?? '')}
+                  value={premiumInput || (premium != null ? String(premium) : '')}
                   onChangeText={(text) => {
-                    if (text === '' || text === '.' || text.endsWith('.')) {
-                      onAmountChange('premium')(text);
-                      return;
+                    // 记录输入过程，支持小数点
+                    setPremiumInput(text);
+                    // 只在失去焦点时同步到外部状态
+                  }}
+                  onEndEditing={(e) => {
+                    // 失去焦点时同步到外部状态
+                    onAmountChange('premium')(premiumInput || e.nativeEvent.text);
+                    setPremiumInput(''); // 清空局部状态
+                  }}
+                  onBlur={() => {
+                    // 失去焦点时同步
+                    if (premiumInput) {
+                      onAmountChange('premium')(premiumInput);
+                      setPremiumInput('');
                     }
-                    const result = validateAmount(text, 10000);
-                    onAmountChange('premium')(String(result.value));
                   }}
                   placeholder="请输入"
                   placeholderTextColor={colors.text[2]}
                 />
               </View>
 
-              {/* 可点击的建议保额 */}
+              {/* 建议保额 */}
               <View style={styles.inputRow}>
                 <Text style={styles.inputLabel}>建议保额（万）</Text>
                 {editingRecommended ? (
@@ -179,37 +193,36 @@ const CoverageItem: React.FC<CoverageItemProps> = ({coverage, onToggle, onAmount
                     style={styles.recommendedDisplay}
                     onPress={startEditRecommended}
                     activeOpacity={0.7}>
-                    <Text style={styles.suggestAmount}>
-                      {Number(coverage.recommendedAmount) || 0}
-                    </Text>
+                    <Text style={styles.suggestAmount}>{recommendedAmount}</Text>
                     <Text style={styles.editHint}>点击修改</Text>
                   </TouchableOpacity>
                 )}
               </View>
 
+              {/* 保障缺口 */}
               <View style={styles.inputRow}>
                 <Text style={styles.inputLabel}>保障缺口（万）</Text>
-                <Text style={[styles.gapAmount, (Number(coverage.gapAmount) || 0) > 0 && styles.gapNegative]}>
-                  {Number(coverage.gapAmount) || 0}
+                <Text style={[styles.gapAmount, gapAmount > 0 && styles.gapNegative]}>
+                  {gapAmount}
                 </Text>
               </View>
 
-              {/* 保障效率提示 */}
-              {coverage.coverageAmount && coverage.premium && coverage.premium > 0 && (
+              {/* 保障效率 */}
+              {efficiency != null ? (
                 <View style={styles.efficiencyRow}>
                   <Text style={styles.efficiencyLabel}>保障效率</Text>
-                  <Text style={styles.efficiencyValue}>
-                    {Math.round((coverage.coverageAmount / coverage.premium) * 10) / 10} 倍
-                  </Text>
+                  <Text style={styles.efficiencyValue}>{efficiency} 倍</Text>
                 </View>
-              )}
+              ) : null}
             </>
-          )}
+          ) : null}
+
+          {/* 保单详情 - 始终显示 */}
           <View style={styles.inputRow}>
             <Text style={styles.inputLabel}>保单详情</Text>
             <TextInput
               style={[styles.input, styles.multilineInput]}
-              value={coverage.policyDetails ?? ''}
+              value={policyDetails}
               onChangeText={onAmountChange('policyDetails')}
               placeholder="填写保单号或产品说明"
               placeholderTextColor={colors.text[2]}
@@ -217,7 +230,7 @@ const CoverageItem: React.FC<CoverageItemProps> = ({coverage, onToggle, onAmount
             />
           </View>
         </View>
-      )}
+      ) : null}
     </View>
   );
 };

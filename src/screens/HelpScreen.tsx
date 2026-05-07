@@ -12,12 +12,14 @@ import {
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '../types';
 import {helpContent, type HelpItem, type HelpCategory} from '../data/helpContent';
+import {useFamily} from '../store/familyStore';
 import AppHeader from '../components/common/AppHeader';
 import {colors, typography, spacing, borderRadius} from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Help'>;
 
 const HelpScreen: React.FC<Props> = ({navigation}) => {
+  const {state: familyState} = useFamily();
   const [searchText, setSearchText] = useState('');
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [showSearch, setShowSearch] = useState(false);
@@ -147,8 +149,7 @@ const HelpScreen: React.FC<Props> = ({navigation}) => {
         <TouchableOpacity
           style={styles.quickAction}
           onPress={() => {
-            setSearchText('');
-            setExpandedItem('create_family');
+            navigation.navigate('FamilySelect');
           }}>
           <Text style={styles.quickActionIcon}>🏠</Text>
           <Text style={styles.quickActionText}>创建家庭</Text>
@@ -156,8 +157,12 @@ const HelpScreen: React.FC<Props> = ({navigation}) => {
         <TouchableOpacity
           style={styles.quickAction}
           onPress={() => {
-            setSearchText('');
-            setExpandedItem('add_member');
+            const firstFamily = familyState.families[0];
+            if (firstFamily) {
+              navigation.navigate('MemberList', {familyId: firstFamily.id});
+            } else {
+              navigation.navigate('FamilySelect');
+            }
           }}>
           <Text style={styles.quickActionIcon}>👥</Text>
           <Text style={styles.quickActionText}>添加成员</Text>
@@ -165,8 +170,12 @@ const HelpScreen: React.FC<Props> = ({navigation}) => {
         <TouchableOpacity
           style={styles.quickAction}
           onPress={() => {
-            setSearchText('');
-            setExpandedItem('export_report');
+            const firstFamily = familyState.families[0];
+            if (firstFamily) {
+              navigation.navigate('ExportPreview', {familyId: firstFamily.id});
+            } else {
+              navigation.navigate('FamilySelect');
+            }
           }}>
           <Text style={styles.quickActionIcon}>📄</Text>
           <Text style={styles.quickActionText}>导出报告</Text>

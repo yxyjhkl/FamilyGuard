@@ -14,9 +14,10 @@ import {
 } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import Share from 'react-native-share';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../types';
+import type { RootStackParamList, AnalysisMode } from '../types';
 import { useFamily } from '../hooks/useFamily';
 import { useSettings } from '../store/settingsStore';
 import { aiService } from '../services/aiService';
@@ -107,7 +108,7 @@ const OverviewSkeleton: React.FC = () => (
 type Props = NativeStackScreenProps<RootStackParamList, 'AIAnalysis'>;
 
 const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { familyId } = route.params;
+  const { familyId, mode: initialMode } = route.params;
   const { getFamilyById, updateExportSettings } = useFamily();
   const settings = useSettings(); // 优化 #8: 获取自定义保额配置
   const [analysisResult, setAnalysisResult] = useState<FamilyAnalysisResult | null>(null);
@@ -125,7 +126,10 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
   const [summaryStyle, setSummaryStyle] = useState<SummaryStyle>('professional'); // 优化 #3: 总结风格
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistory[]>([]); // 优化 #6: 历史记录
   const [showHistory, setShowHistory] = useState(false); // 优化 #6: 显示历史
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(initialMode || 'professional'); // 精细版/快速版
   const viewShotRef = useRef<ViewShot>(null);
+  
+  const family = useMemo(() => getFamilyById(familyId), [familyId, getFamilyById]);
   
   // 截图分享功能
   const handleCaptureAndShare = useCallback(async () => {
@@ -148,6 +152,69 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     }
   }, []);
+
+  // 过滤Markdown格式符号
+  const stripMarkdown = (text: string): string => {
+    if (!text) return '';
+    return text
+      .replace(/#{1,6}\s+/g, '')        // 移除 ## 标题符号
+      .replace(/\*\*(.+?)\*\*/g, '$1')   // 移除 **加粗**
+      .replace(/\*(.+?)\*/g, '$1')       // 移除 *斜体*
+      .replace(/`(.+?)`/g, '$1')         // 移除 `行内代码`
+      .replace(/```[\s\S]*?```/g, '')    // 移除代码块
+      .replace(/^\s*[-*+]\s+/gm, '')     // 移除列表符号
+      .replace(/^\s*\d+\.\s+/gm, '')    // 移除有序列表
+      .replace(/^\s*>\s+/gm, '')        // 移除引用符号
+      .replace(/\n{3,}/g, '\n\n')       // 压缩多余换行
+      .trim();
+  };
+
+  // 生成可分享的文字报告
+  const generateTextReport = useCallback((): string => {
+    if (!analysisResult || !family) return '';
+    
+    const lines: string[] = [];
+    lines.push(`【家庭保障分析报告】`);
+    lines.push(`分析家庭：${family.name}`);
+    lines.push(`保障评分：${analysisResult.familyProtectionScore}分`);
+    lines.push(`保障缺口：${analysisResult.totalGaps}项`);
+    lines.push(`高优先级：${analysisResult.highPriorityGaps}项`);
+    lines.push(`\n${analysisResult.overallAdvice}`);
+    
+    if (analysisResult.aiSummary) {
+      lines.push(`\n【AI智能分析】`);
+      lines.push(stripMarkdown(analysisResult.aiSummary));
+    }
+    
+    return lines.join('\n');
+  }, [analysisResult, family]);
+
+  // 文字分享
+  const handleTextShare = useCallback(async () => {
+    const text = generateTextReport();
+    if (!text) return;
+    
+    try {
+      await Share.open({
+        message: text,
+        title: '家庭保障分析报告',
+      });
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : '';
+      if (!errMsg.includes('User did not share')) {
+        Alert.alert('分享失败', '请重试');
+      }
+    }
+  }, [generateTextReport]);
+
+  // 复制报告
+  const handleCopyReport = useCallback(() => {
+    const text = generateTextReport();
+    if (!text) return;
+    
+    Clipboard.setString(text);
+    Alert.alert('已复制', '报告已复制到剪贴板，可直接粘贴发送给客户');
+  }, [generateTextReport]);
   
   // AI配置状态 - 使用 state 避免单例状态不同步问题
   const [isAIConfigured, setIsAIConfigured] = useState(() => aiService.isConfigured());
@@ -158,8 +225,6 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
       setIsAIConfigured(aiService.isConfigured());
     }, [])
   );
-
-  const family = useMemo(() => getFamilyById(familyId), [familyId, getFamilyById]);
 
   // 辅助函数：句子截断（优化 #4）
   const truncateToSentence = useCallback((text: string, maxLength: number) => {
@@ -195,8 +260,8 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
     setLoadingState('analyzing'); // 优化 #7: 细化加载状态
     setLoadingMessage('正在分析保障数据...');
     try {
-      // 本地分析（无需API）
-      const result = aiService.analyzeFamily(family);
+      // 本地分析（无需API），传入分析模式
+      const result = aiService.analyzeFamily(family, analysisMode);
       setAnalysisResult(result);
       setSelectedMember(null);
       
@@ -215,7 +280,7 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
       logger.error('AIAnalysis', '分析失败', error);
       setLoadingState('error');
     }
-  }, [family, familyId, updateExportSettings, truncateToSentence]);
+  }, [family, familyId, updateExportSettings, truncateToSentence, analysisMode]);
 
   // AI增强分析（需要API Key）
   const handleAIAnalysis = useCallback(async () => {
@@ -224,13 +289,14 @@ const AIAnalysisScreen: React.FC<Props> = ({ route, navigation }) => {
     setLoadingState('analyzing'); // 优化 #7: 细化加载状态
     setLoadingMessage('正在分析保障数据...');
     try {
-      // 优化 #8: 传递自定义保额配置
+      // 优化 #8: 传递自定义保额配置，传入分析模式
       const customAmounts = settings?.state?.customRecommendedAmounts;
       
       setLoadingMessage('正在生成AI分析...');
       const result = await aiService.analyzeWithAI(family, {
         summaryStyle, // 优化 #3: 总结风格
         customRecommendedAmounts: customAmounts,
+        mode: analysisMode,
       });
       
       setAnalysisResult(result);
@@ -251,7 +317,7 @@ ${result.aiSummary || result.overallAdvice}`, 300);
       logger.error('AIAnalysis', 'AI分析失败', error);
       setLoadingState('error');
     }
-  }, [family, familyId, updateExportSettings, summaryStyle, settings, truncateToSentence]);
+  }, [family, familyId, updateExportSettings, summaryStyle, settings, truncateToSentence, analysisMode]);
 
   // 本地生成话术
   const handleLocalScript = useCallback(() => {
@@ -288,6 +354,17 @@ ${result.aiSummary || result.overallAdvice}`, 300);
       setIsGeneratingScript(false);
     }
   }, [objection, isAIConfigured]);
+
+  // 再来一条（根据当前话术来源决定用AI还是本地生成）
+  const handleRegenerateScript = useCallback(() => {
+    if (!objection.trim()) return;
+    
+    if (scriptResult?.isAI && isAIConfigured) {
+      handleAIScript();
+    } else {
+      handleLocalScript();
+    }
+  }, [objection, scriptResult, isAIConfigured, handleAIScript, handleLocalScript]);
 
   // 获取风险颜色
   const getRiskColor = (score: number) => {
@@ -334,8 +411,37 @@ ${result.aiSummary || result.overallAdvice}`, 300);
         {!analysisResult && loadingState === 'idle' && (
             <View style={styles.actionSection}>
             <Text style={styles.sectionTitle}>保障检视分析</Text>
+            
+            {/* 分析模式切换 Tab */}
+            <View style={styles.modeSelector}>
+              <TouchableOpacity
+                style={[styles.modeTab, analysisMode === 'professional' && styles.modeTabActive]}
+                onPress={() => setAnalysisMode('professional')}
+              >
+                <Text style={[styles.modeTabText, analysisMode === 'professional' && styles.modeTabTextActive]}>
+                  📋 精细版
+                </Text>
+                <Text style={[styles.modeTabDesc, analysisMode === 'professional' && styles.modeTabDescActive]}>
+                  20项保障标准
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modeTab, analysisMode === 'quick' && styles.modeTabActive]}
+                onPress={() => setAnalysisMode('quick')}
+              >
+                <Text style={[styles.modeTabText, analysisMode === 'quick' && styles.modeTabTextActive]}>
+                  ⚡ 快速版
+                </Text>
+                <Text style={[styles.modeTabDesc, analysisMode === 'quick' && styles.modeTabDescActive]}>
+                  8项核心保障
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             <Text style={styles.sectionDesc}>
-              基于19项保障标准，为您的{family.name}进行智能分析
+              {analysisMode === 'professional' 
+                ? '基于20项保障标准，为您的家庭进行精细诊断分析'
+                : '精简版8项核心保障，快速了解家庭保障状况'}
             </Text>
 
             {/* 优化 #3: 总结风格选择器 */}
@@ -484,14 +590,14 @@ ${result.aiSummary || result.overallAdvice}`, 300);
                   <Text style={styles.statLabel}>家庭成员</Text>
                 </View>
               </View>
-              <Text style={styles.adviceText}>{analysisResult.overallAdvice}</Text>
-
-              {/* AI总结（如果有） */}
-              {analysisResult.aiSummary && (
+              {/* 根据是否有AI总结，显示不同内容 */}
+              {analysisResult.aiSummary ? (
                 <View style={styles.aiSummaryCard}>
                   <Text style={styles.aiSummaryLabel}>🤖 AI分析</Text>
-                  <Text style={styles.aiSummaryText}>{analysisResult.aiSummary}</Text>
+                  <Text style={styles.aiSummaryText}>{stripMarkdown(analysisResult.aiSummary)}</Text>
                 </View>
+              ) : (
+                <Text style={styles.adviceText}>{analysisResult.overallAdvice}</Text>
               )}
             </View>
 
@@ -538,13 +644,25 @@ ${result.aiSummary || result.overallAdvice}`, 300);
               style={[styles.bottomButton, styles.shareButton]}
               onPress={handleCaptureAndShare}
             >
-              <Text style={styles.bottomButtonText}>📤 导出/分享</Text>
+              <Text style={styles.bottomButtonText}>📤 导出图片</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.bottomButton, styles.textShareButton]}
+              onPress={handleTextShare}
+            >
+              <Text style={styles.bottomButtonText}>📝 分享文字</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.bottomButton, styles.copyButton]}
+              onPress={handleCopyReport}
+            >
+              <Text style={styles.bottomButtonText}>📋 复制</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.bottomButton, styles.reAnalyzeButton]}
               onPress={() => setAnalysisResult(null)}
             >
-              <Text style={styles.bottomButtonText}>← 重新分析</Text>
+              <Text style={styles.bottomButtonText}>← 重新</Text>
             </TouchableOpacity>
           </View>
           </>
@@ -553,7 +671,7 @@ ${result.aiSummary || result.overallAdvice}`, 300);
 
       {/* 话术生成区 */}
       <View style={styles.scriptSection}>
-          <Text style={styles.sectionTitle}>💬 谈单话术生成</Text>
+          <Text style={styles.sectionTitle}>💬 谈单沟通关键句</Text>
           <Text style={styles.sectionDesc}>输入客户异议，自动生成专业回应话术</Text>
           <TextInput
             style={styles.scriptInput}
@@ -600,6 +718,7 @@ ${result.aiSummary || result.overallAdvice}`, 300);
           </View>
 
           {scriptResult && (
+            <ScrollView style={styles.scriptResultScroll} showsVerticalScrollIndicator={true}>
             <View style={styles.scriptResult}>
               {scriptResult.isAI && (
                 <View style={styles.scriptSourceBadge}>
@@ -627,7 +746,21 @@ ${result.aiSummary || result.overallAdvice}`, 300);
                   <Text style={styles.scriptContent}>{scriptResult.followUp}</Text>
                 </View>
               )}
+              
+              {/* 再来一条按钮 */}
+              <TouchableOpacity
+                style={[styles.regenerateButton, isGeneratingScript && styles.regenerateButtonDisabled]}
+                onPress={handleRegenerateScript}
+                disabled={isGeneratingScript || !objection.trim()}
+              >
+                {isGeneratingScript ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.regenerateButtonText}>🔄 再来一条</Text>
+                )}
+              </TouchableOpacity>
             </View>
+            </ScrollView>
           )}
         </View>
     </View>
@@ -766,6 +899,43 @@ const styles = StyleSheet.create({
     color: colors.text[2],
     marginBottom: spacing.lg,
   },
+
+  // 分析模式选择器
+  modeSelector: {
+    flexDirection: 'row',
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  modeTab: {
+    flex: 1,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background[1],
+    borderWidth: 1,
+    borderColor: colors.card.border,
+    alignItems: 'center',
+  },
+  modeTabActive: {
+    backgroundColor: colors.primary[1] + '15',
+    borderColor: colors.primary[1],
+  },
+  modeTabText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text[1],
+    marginBottom: 2,
+  },
+  modeTabTextActive: {
+    color: colors.primary[1],
+  },
+  modeTabDesc: {
+    fontSize: 11,
+    color: colors.text[2],
+  },
+  modeTabDescActive: {
+    color: colors.primary[1],
+  },
+
   primaryButton: {
     flexDirection: 'row',
     backgroundColor: colors.primary[1],
@@ -1170,6 +1340,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.functional.success,
     marginRight: spacing.xs,
   },
+  textShareButton: {
+    backgroundColor: colors.primary[2],
+    marginRight: spacing.xs,
+  },
+  copyButton: {
+    backgroundColor: colors.functional.warning,
+    marginRight: spacing.xs,
+  },
   bottomButtonText: {
     ...typography.body,
     color: '#fff',
@@ -1225,6 +1403,24 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 15,
   },
+  regenerateButton: {
+    backgroundColor: colors.primary[1],
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  regenerateButtonDisabled: {
+    backgroundColor: colors.primary[1] + '60',
+  },
+  regenerateButtonText: {
+    color: colors.text[3],
+    fontWeight: '600',
+    fontSize: 15,
+  },
   scriptSourceBadge: {
     backgroundColor: (colors.secondary[1] || '#6366F1') + '20',
     paddingHorizontal: spacing.sm,
@@ -1256,6 +1452,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background[0],
     borderRadius: borderRadius.md,
     padding: spacing.md,
+  },
+  scriptResultScroll: {
+    marginTop: spacing.md,
+    maxHeight: 400, // 限制最大高度，超出可滚动
   },
   scriptItem: {
     marginBottom: spacing.md,
